@@ -1,16 +1,15 @@
 import logging
 import sqlite3
 import json
-import os  # CRITICAL: This was missing!
+import os  # Added missing import to fix the crash
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler, ContextTypes
 
 # --- CONFIGURATION ---
-# Pulls the secret token from Render's Environment Variables
 TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = 5431140655
-GAME_URL = "https://msgan-coder.github.io/tbingo_game/" 
-ENTRY_FEE = 10 
+GAME_URL = "https://msgan-coder.github.io/tbingo_game/"
+ENTRY_FEE = 10
 COMMISSION = 0.30  # 30% profit for admin
 
 # --- DATABASE SETUP ---
@@ -32,9 +31,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.message.from_user
-    if not update.message.photo:
-        return
-        
     photo_id = update.message.photo[-1].file_id
     
     keyboard = [
@@ -50,16 +46,19 @@ async def handle_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Verification sent to Admin. You will be notified shortly.")
 
 async def handle_webapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """This function triggers when a player clicks 'BINGO!' in the Mini App"""
     raw_data = update.effective_message.web_app_data.data
     data = json.loads(raw_data)
     user = update.message.from_user
 
     if data.get("action") == "claim_bingo":
+        # Notify Admin
         await context.bot.send_message(
             chat_id=ADMIN_ID,
             text=f"🏆 BINGO CLAIMED!\n\nUser: @{user.username}\nID: {user.id}\nNumbers: {data.get('numbers')}"
         )
-        await update.message.reply_text("Your Bingo claim has been sent to the Admin! Please wait.")
+        # Notify User
+        await update.message.reply_text("Your Bingo claim has been sent to the Admin! Please wait for verification.")
 
 # --- ADMIN HANDLERS ---
 async def admin_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -77,14 +76,13 @@ async def admin_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("🎮 Play Bingo", web_app=WebAppInfo(url=GAME_URL))
         ]])
         await context.bot.send_message(user_id, "✅ Verified! Click below to enter the game.", reply_markup=play_keyboard)
-        await query.edit_message_caption(caption=f"{query.message.caption}\n\n✅ APPROVED")
+        await query.edit_message_caption(caption=query.message.caption + "\n\n✅ APPROVED")
     
     elif action == "rej":
-        await context.bot.send_message(user_id, "❌ Payment rejected. Screenshot invalid.")
-        await query.edit_message_caption(caption=f"{query.message.caption}\n\n❌ REJECTED")
+        await context.bot.send_message(user_id, "❌ Payment rejected. Screenshot not valid or amount incorrect.")
+        await query.edit_message_caption(caption=query.message.caption + "\n\n❌ REJECTED")
     
     conn.close()
-    await query.answer()
 
 async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.from_user.id != ADMIN_ID: return
@@ -97,17 +95,23 @@ async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     profit = total_pot * COMMISSION
     winner_gets = total_pot - profit
     
-    await update.message.reply_text(
-        f"📊 GAME STATS\nPlayers: {count}\nPot: {total_pot} ETB\nProfit: {profit} ETB\nWinner: {winner_gets} ETB"
-    )
+    stats_text = (f"📊 GAME STATS\n"
+                  f"Active Players: {count}\n"
+                  f"Total Pot: {total_pot} ETB\n"
+                  f"Admin Profit: {profit} ETB\n"
+                  f"Winner Prize: {winner_gets} ETB")
+    await update.message.reply_text(stats_text)
 
 async def reset_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Command to clear all players after a game ends"""
     if update.message.from_user.id != ADMIN_ID: return
+    
     conn = sqlite3.connect('bingo.db')
-    conn.execute("DELETE FROM players")
+    c = conn.cursor()
+    c.execute("DELETE FROM players")
     conn.commit()
     conn.close()
-    await update.message.reply_text("🔄 Game has been reset.")
+    await update.message.reply_text("🔄 Game has been reset. All players must pay again for the next round.")
 
 # --- MAIN RUNNER ---
 if __name__ == '__main__':
@@ -115,9 +119,12 @@ if __name__ == '__main__':
     print("Bingo Bot is starting...")
     app = Application.builder().token(TOKEN).build()
     
+    # Commands
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("stats", admin_stats))
     app.add_handler(CommandHandler("reset", reset_game))
+    
+    # Messages & Data
     app.add_handler(MessageHandler(filters.PHOTO, handle_screenshot))
     app.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, handle_webapp_data))
     app.add_handler(CallbackQueryHandler(admin_button))
