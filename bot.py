@@ -2,8 +2,7 @@ import logging
 import sqlite3
 import os
 import random
-import asyncio
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -61,15 +60,10 @@ async def auto_caller(context: ContextTypes.DEFAULT_TYPE):
         num = random.randint(1, 75)
     called_numbers.append(num)
     letter = (
-        "B"
-        if num <= 15
-        else "I"
-        if num <= 30
-        else "N"
-        if num <= 45
-        else "G"
-        if num <= 60
-        else "O"
+        "B" if num <= 15 else
+        "I" if num <= 30 else
+        "N" if num <= 45 else
+        "G" if num <= 60 else "O"
     )
     text = f"🔔 **NEW NUMBER: {letter}-{num}**\n\n{get_bingo_board()}"
     await context.bot.send_message(chat_id=GROUP_CHAT_ID, text=text, parse_mode="Markdown")
@@ -140,7 +134,14 @@ def main():
     application.add_handler(CommandHandler("startgame", start_game))
     application.add_handler(CallbackQueryHandler(admin_button))
 
-    application.run_polling()
+    # --- Webhook mode for Render free Web Service ---
+    PORT = int(os.getenv("PORT", "8080"))
+    application.run_webhook(
+        listen="0.0.0.0",
+        port=PORT,
+        url_path=TOKEN,
+        webhook_url=f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}/{TOKEN}"
+    )
 
 
 if __name__ == "__main__":
