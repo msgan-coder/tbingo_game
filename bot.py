@@ -3,13 +3,14 @@ import sqlite3
 import json
 import os
 import random
+import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler, ContextTypes
 
 # --- CONFIGURATION ---
 TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = 5431140655
-GROUP_CHAT_ID = -1003949842028 
+GROUP_CHAT_ID = -1003949842028 # Based on your screenshot
 GAME_URL = "https://msgan-coder.github.io/tbingo_game/"
 ENTRY_FEE = 10
 COMMISSION = 0.30
@@ -27,6 +28,12 @@ def init_db():
     conn.commit()
     conn.close()
 
+def get_player_count():
+    conn = sqlite3.connect("bingo.db")
+    count = conn.execute("SELECT COUNT(*) FROM players WHERE status='PAID'").fetchone()[0]
+    conn.close()
+    return count
+
 def get_bingo_board():
     b = [n for n in sorted(called_numbers) if 1 <= n <= 15]
     i = [n for n in sorted(called_numbers) if 16 <= n <= 30]
@@ -39,18 +46,10 @@ def get_bingo_board():
             f"✨ **G**: {', '.join(map(str, g))}\n"
             f"✨ **O**: {', '.join(map(str, o))}")
 
-# --- GAME LOGIC ---
+# --- AUTO CALLER JOB ---
 async def auto_caller(context: ContextTypes.DEFAULT_TYPE):
     global called_numbers, game_active
     if not game_active:
-        # Stop the job if game is no longer active
-        job = context.job
-        job.schedule_removal()
-        return
-
-    if len(called_numbers) >= 75:
-        game_active = False
-        await context.bot.send_message(chat_id=GROUP_CHAT_ID, text="🏁 All numbers called! Game over.")
         return
 
     num = random.randint(1, 75)
@@ -70,8 +69,32 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"🇪🇹 Welcome to Telebirr Bingo!\n"
             f"Entry Fee: {ENTRY_FEE} ETB\n"
             f"Transfer to: 0931792446\n\n"
-            "📸 Send a screenshot of your payment here to join the game!")
+            "📸 Send a screenshot of your payment here to join.")
     await update.message.reply_text(text)
+
+async def start_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global game_active
+    if update.effective_user.id != ADMIN_ID: return
+
+    count = get_player_count()
+    if count == 0:
+        await update.message.reply_text("❌ No paid players yet!")
+        return
+
+    game_active = True
+    pot = count * ENTRY_FEE
+    # Prize logic: 10% for 1 line, 15% for 2, 20% for 3, 25% for Full House (Total 70% to players)
+    rules = (f"🚀 **BINGO GAME STARTED!**\n\n"
+             f"💰 **Total Pot: {pot} ETB**\n"
+             f"🏆 1 Line: {pot * 0.10} ETB\n"
+             f"🏆 2 Lines: {pot * 0.15} ETB\n"
+             f"🏆 3 Lines: {pot * 0.20} ETB\n"
+             f"🏆 Full House: {pot * 0.25} ETB\n\n"
+             f"🚫 Chat Locked! Pay attention!")
+    await context.bot.send_message(chat_id=GROUP_CHAT_ID, text=rules, parse_mode="Markdown")
+    
+    # Start the 5-second repeater loop
+    context.job_queue.run_repeating(auto_caller, interval=5, first=5, name="caller_job")
 
 async def handle_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -81,30 +104,21 @@ async def handle_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_photo(chat_id=ADMIN_ID, photo=photo_id, 
                                  caption=f"💰 Payment from: @{user.username}", 
                                  reply_markup=InlineKeyboardMarkup(keyboard))
-    await update.message.reply_text("Admin is verifying your payment...")
+    await update.message.reply_text("Payment received. Admin is verifying!")
 
-async def start_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_webapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global game_active
-    if update.effective_user.id != ADMIN_ID: return
+    data = json.loads(update.effective_message.web_app_data.data)
+    user = update.effective_user
+    if data.get("action") == "claim_bingo":
+        game_active = False # Pause caller
+        for job in context.job_queue.get_jobs_by_name("caller_job"):
+            job.schedule_removal()
 
-    conn = sqlite3.connect("bingo.db")
-    count = conn.execute("SELECT COUNT(*) FROM players WHERE status='PAID'").fetchone()[0]
-    conn.close()
-
-    if count == 0:
-        await update.message.reply_text("❌ No paid players yet!")
-        return
-
-    game_active = True
-    pot = count * ENTRY_FEE
-    rules = (f"🚀 **GAME STARTED!**\n\n"
-             f"💰 **JACKPOT: {pot * 0.70} ETB**\n"
-             f"🏆 1 Line: {pot * 0.10} ETB\n"
-             f"🏆 2 Lines: {pot * 0.20} ETB\n"
-             f"🏆 Full House: {pot * 0.40} ETB\n\n"
-             f"🚫 Chat is LOCKED!")
-    await context.bot.send_message(chat_id=GROUP_CHAT_ID, text=rules, parse_mode="Markdown")
-    context.job_queue.run_repeating(auto_caller, interval=5, first=5)
+        await context.bot.send_message(chat_id=ADMIN_ID, text=f"🏆 **BINGO CLAIM!** @{user.username}",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ Confirm Winner", callback_data=f"win_{user.id}_{user.username}"),
+                                               InlineKeyboardButton("❌ Fake Claim", callback_data="resume")]]))
+        await context.bot.send_message(chat_id=GROUP_CHAT_ID, text=f"🔔 @{user.username} says BINGO! Game paused for check.")
 
 async def admin_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -119,14 +133,15 @@ async def admin_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn.close()
         
         kb = InlineKeyboardMarkup([[InlineKeyboardButton("🎮 Play Bingo", web_app=WebAppInfo(url=GAME_URL))]])
-        await context.bot.send_message(chat_id=user_id, text="✅ Payment Approved! Enter the game:", reply_markup=kb)
+        await context.bot.send_message(chat_id=user_id, text="✅ Payment Verified! Here is your card:", reply_markup=kb)
+        await context.bot.send_message(chat_id=GROUP_CHAT_ID, text=f"✅ New Player Joined: @{username}\n📊 Total: {get_player_count()}")
         await query.edit_message_reply_markup(reply_markup=None)
 
     elif data[0] == "win":
         global game_active, called_numbers
         username = data[2]
         await context.bot.send_message(chat_id=GROUP_CHAT_ID, 
-                                       text=f"🎊 **WINNER: @{username}**\n\n⚠️ Round Over. All payments expired. New payment required for next game!",
+                                       text=f"🎊 **WINNER: @{username}**\n\n⚠️ Round finished. Payments have expired. Resetting for next game!",
                                        parse_mode="Markdown")
         game_active = False
         called_numbers = []
@@ -134,6 +149,13 @@ async def admin_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn.execute("DELETE FROM players")
         conn.commit()
         conn.close()
+        await query.edit_message_reply_markup(reply_markup=None)
+
+    elif data[0] == "resume":
+        global game_active
+        game_active = True
+        context.job_queue.run_repeating(auto_caller, interval=5, first=1, name="caller_job")
+        await context.bot.send_message(chat_id=GROUP_CHAT_ID, text="❌ False alarm! Numbers calling again...")
         await query.edit_message_reply_markup(reply_markup=None)
 
 async def lock_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -149,6 +171,7 @@ def main():
     application.add_handler(CommandHandler("play", start_game))
     application.add_handler(CallbackQueryHandler(admin_button))
     application.add_handler(MessageHandler(filters.PHOTO, handle_screenshot))
+    application.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, handle_webapp_data))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, lock_chat))
     application.run_polling()
 
