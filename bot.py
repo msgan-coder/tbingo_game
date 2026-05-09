@@ -83,6 +83,29 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(welcome_text, parse_mode="Markdown")
 
+async def handle_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Detects photos and sends them to Admin for approval"""
+    user = update.effective_user
+    photo_id = update.message.photo[-1].file_id # Get the highest quality photo
+    
+    await update.message.reply_text("✅ Screenshot received! Please wait while the Admin verifies your payment.")
+
+    # Verification buttons for Admin
+    kb = [
+        [
+            InlineKeyboardButton("✅ Approve", callback_data=f"pay_approve_{user.id}_{user.username}"),
+            InlineKeyboardButton("❌ Reject", callback_data=f"pay_reject_{user.id}_{user.username}")
+        ]
+    ]
+    
+    await context.bot.send_photo(
+        chat_id=ADMIN_ID,
+        photo=photo_id,
+        caption=f"💰 **New Payment Verification**\nFrom: @{user.username}\nID: `{user.id}`\nFee: 10 ETB",
+        reply_markup=InlineKeyboardMarkup(kb),
+        parse_mode="Markdown"
+    )
+
 async def web_app_data_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global game_active
     try:
@@ -136,7 +159,6 @@ async def start_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
     called_numbers = []
     last_called = None
     
-    # Updated rules with Payment Info
     rules = (
         "🚀 **NEW BINGO GAME STARTING!**\n\n"
         "💳 **ENTRY FEE:** 10 ETB\n"
@@ -174,7 +196,19 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     data = query.data.split("_")
 
-    if data[0] == "win":
+    # Handle Payment Approval
+    if data[0] == "pay":
+        target_id = data[2]
+        target_name = data[3]
+        if data[1] == "approve":
+            await context.bot.send_message(chat_id=target_id, text="✅ **Payment Approved!** You are now cleared to join the game.")
+            await query.edit_message_caption(caption=f"✅ Payment Approved for @{target_name}")
+        elif data[1] == "reject":
+            await context.bot.send_message(chat_id=target_id, text="❌ **Payment Rejected.** Please send a valid screenshot of the 10 ETB transfer.")
+            await query.edit_message_caption(caption=f"❌ Payment Rejected for @{target_name}")
+
+    # Handle Win/Loss Verification
+    elif data[0] == "win":
         game_active = False
         for job in context.job_queue.get_jobs_by_name("bingo_job"): job.schedule_removal()
         await context.bot.send_message(chat_id=GROUP_CHAT_ID, text=f"🎊 **WE HAVE A WINNER!**\nCongratulations @{data[2]}! 🏆")
@@ -185,6 +219,7 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(chat_id=GROUP_CHAT_ID, text=f"❌ @{data[2]}'s claim was invalid.\n▶️ **RESUMING GAME...**")
         await query.edit_message_text(text=f"❌ Claim Rejected for @{data[2]}")
 
+    # Admin Control Panel
     elif data[1] == "pause":
         game_active = False
         await context.bot.send_message(chat_id=GROUP_CHAT_ID, text="⏸ **GAME PAUSED BY ADMIN**")
@@ -213,6 +248,9 @@ def main():
     application.add_handler(CommandHandler("play", start_game))
     application.add_handler(CallbackQueryHandler(admin_callback))
     application.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, web_app_data_handler))
+    
+    # Listen for Photos (Screenshots)
+    application.add_handler(MessageHandler(filters.PHOTO, handle_screenshot))
     
     application.run_polling(drop_pending_updates=True)
 
