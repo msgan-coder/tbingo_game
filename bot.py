@@ -6,25 +6,36 @@ import threading
 import time
 import requests
 import json
-from flask import Flask
+from flask import Flask, jsonify
+from flask_cors import CORS
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler, ContextTypes
 
-# --- FLASK SERVER ---
-app = Flask('')
+# --- FLASK SERVER & LIVE API ---
+app = Flask(__name__)
+CORS(app)  # Allows your GitHub page to fetch data from this Render server
 
 @app.route('/')
 def home():
     return "Professional Bingo Engine is Online"
+
+@app.route('/get_numbers')
+def get_numbers():
+    """Endpoint for the WebApp to fetch live numbers without refreshing"""
+    global called_numbers, game_active
+    return jsonify({
+        "recent": called_numbers[-5:][::-1],  # Last 5 numbers, newest first
+        "active": game_active
+    })
 
 def run_flask():
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
 
 def keep_alive():
+    """Prevents Render from sleeping by pinging itself every 10 mins"""
     while True:
         try:
-            # Change this to your actual Render URL
             requests.get("https://tbingo-game-4.onrender.com")
         except:
             pass
@@ -69,15 +80,19 @@ def get_horizontal_board():
 def verify_claim(player_numbers):
     """Checks if player's numbers are valid and were actually called."""
     try:
-        marked = [int(n) for n in player_numbers if str(n).isdigit() or n == "FREE"]
-        # Filter out 'FREE' for mathematical check
+        # Standardize 'FREE' and convert others to int
+        marked = []
+        for n in player_numbers:
+            if str(n).upper() == "FREE":
+                marked.append("FREE")
+            elif str(n).isdigit():
+                marked.append(int(n))
+        
         actual_marked = [n for n in marked if isinstance(n, int)]
         
-        # Check 1: Did they mark at least 4 numbers + FREE?
         if len(marked) < 5:
             return False, "Not enough numbers for a Bingo."
 
-        # Check 2: Were all these numbers actually called by the bot?
         invalid_nums = [n for n in actual_marked if n not in called_numbers]
         if invalid_nums:
             return False, f"Numbers not called yet: {', '.join(map(str, invalid_nums))}"
@@ -97,10 +112,8 @@ async def web_app_data_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         numbers = data.get("numbers", [])
         user_id = update.effective_user.id
 
-        # AUTOMATIC PAUSE for professional review
-        game_active = False 
+        game_active = False # AUTOMATIC PAUSE
         
-        # Validate numbers immediately
         is_valid, reason = verify_claim(numbers)
         status_emoji = "✅" if is_valid else "⚠️"
 
@@ -162,7 +175,6 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data[0] == "win":
         username = data[2]
         game_active = False
-        # Remove active jobs
         for job in context.job_queue.get_jobs_by_name("bingo_job"): job.schedule_removal()
         
         await context.bot.send_message(chat_id=GROUP_CHAT_ID, text=f"🎊 **WE HAVE A WINNER!**\nCongratulations @{username}! 🏆\n\nRound has ended.")
@@ -170,7 +182,7 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data[0] == "lose":
         username = data[2]
-        game_active = True # RESUME
+        game_active = True 
         await context.bot.send_message(chat_id=GROUP_CHAT_ID, text=f"❌ @{username}'s claim was invalid.\n\n▶️ **RESUMING GAME...**")
         await query.edit_message_text(text=f"❌ Rejected claim from @{username}")
 
@@ -179,7 +191,6 @@ def main():
     threading.Thread(target=run_flask, daemon=True).start()
     threading.Thread(target=keep_alive, daemon=True).start()
     
-    # Wait for old connections to drop
     time.sleep(2)
     
     application = Application.builder().token(TOKEN).build()
