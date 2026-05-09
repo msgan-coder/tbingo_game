@@ -22,7 +22,6 @@ def home():
 @app.route('/get_numbers')
 def get_numbers():
     global called_numbers, game_active
-    # Returns an empty list if reset has been hit
     return jsonify({
         "recent": called_numbers[-5:][::-1], 
         "active": game_active
@@ -73,6 +72,17 @@ def get_horizontal_board():
 
 # --- HANDLERS ---
 
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Greeting for when users open the bot link directly"""
+    welcome_text = (
+        "👋 **Welcome to T-Bingo!**\n\n"
+        "💰 **Entry Fee:** 10 ETB per game.\n"
+        "🏦 **Bank:** CBE (Commercial Bank of Ethiopia)\n"
+        "🔢 **Account:** `1000141291193`\n\n"
+        "📸 Please send a screenshot of your transfer to the Admin for verification before joining the group game."
+    )
+    await update.message.reply_text(welcome_text, parse_mode="Markdown")
+
 async def web_app_data_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global game_active
     try:
@@ -81,7 +91,6 @@ async def web_app_data_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             username = data.get("user", "Unknown")
             numbers = data.get("numbers", [])
             user_id = update.effective_user.id
-            
             game_active = False 
             
             await context.bot.send_message(
@@ -127,13 +136,16 @@ async def start_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
     called_numbers = []
     last_called = None
     
+    # Updated rules with Payment Info
     rules = (
-        "🚀 **BINGO GAME BEGINNING!**\n\n"
+        "🚀 **NEW BINGO GAME STARTING!**\n\n"
+        "💳 **ENTRY FEE:** 10 ETB\n"
+        "🏦 **CBE:** `1000141291193`\n"
+        "📩 Send screenshots to Admin for approval.\n\n"
         "🏠 **HOUSE RULES:**\n"
-        "1. First to get a full line (Horizontal, Vertical, or Diagonal) wins!\n"
-        "2. You must click the BINGO button to claim.\n"
-        "3. Admin decision is final.\n\n"
-        "🎮 **Click the 'Play Bingo' button below to get your card!**"
+        "1. First full line (Any direction) wins!\n"
+        "2. You must click BINGO to claim.\n\n"
+        "🎮 **Click below to get your card!**"
     )
     
     group_kb = [[InlineKeyboardButton("🎮 Play Bingo", web_app=WebAppInfo(url=GAME_URL))]]
@@ -141,7 +153,8 @@ async def start_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(
         chat_id=GROUP_CHAT_ID, 
         text=rules, 
-        reply_markup=InlineKeyboardMarkup(group_kb)
+        reply_markup=InlineKeyboardMarkup(group_kb),
+        parse_mode="Markdown"
     )
 
     admin_kb = [[InlineKeyboardButton("⏸ Pause", callback_data="adm_pause"), 
@@ -181,25 +194,22 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(chat_id=GROUP_CHAT_ID, text="▶️ **GAME RESUMED**")
 
     elif data[1] == "reset":
-        # --- AUTOMATIC ERASE LOGIC ---
         game_active = False
-        called_numbers = [] # Clears all called numbers
-        last_called = None  # Clears last number reference
-        
-        # Stops the automatic number calling job
-        for job in context.job_queue.get_jobs_by_name("bingo_job"): 
-            job.schedule_removal()
-            
-        await context.bot.send_message(chat_id=GROUP_CHAT_ID, text="♻️ **GAME RESET BY ADMIN.**\nAll numbers have been erased from the board.")
-        await query.edit_message_text(text="♻️ Game State Erased & Reset Successful.")
+        called_numbers = []
+        last_called = None
+        for job in context.job_queue.get_jobs_by_name("bingo_job"): job.schedule_removal()
+        await context.bot.send_message(chat_id=GROUP_CHAT_ID, text="♻️ **GAME RESET BY ADMIN.**\nBoard cleared. Please pay 10 ETB for the next round!")
+        await query.edit_message_text(text="♻️ Reset Successful.")
 
 def main():
     init_db()
     threading.Thread(target=run_flask, daemon=True).start()
-    
     requests.get(f"https://api.telegram.org/bot{TOKEN}/deleteWebhook")
     
     application = Application.builder().token(TOKEN).build()
+    
+    # Handlers
+    application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("play", start_game))
     application.add_handler(CallbackQueryHandler(admin_callback))
     application.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, web_app_data_handler))
