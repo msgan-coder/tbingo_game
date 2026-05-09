@@ -7,14 +7,29 @@
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
         :root { --primary: #2c3e50; --accent: #f1c40f; --success: #2ecc71; --danger: #e74c3c; }
-        body { font-family: sans-serif; background: #f0f2f5; padding: 20px; display: flex; flex-direction: column; align-items: center; }
+        body { font-family: sans-serif; background: #f0f2f5; padding: 15px; display: flex; flex-direction: column; align-items: center; }
+        
+        /* Recent Calls Bar Styling */
+        .recent-calls-container {
+            width: 100%; max-width: 400px; background: white; padding: 10px;
+            border-radius: 10px; margin-bottom: 15px; text-align: center;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .recent-label { font-size: 12px; font-weight: bold; color: #777; margin-bottom: 8px; }
+        #recent-list { display: flex; justify-content: center; gap: 8px; min-height: 40px; }
+        .recent-num { 
+            width: 35px; height: 35px; border-radius: 50%; background: #eee; 
+            display: flex; align-items: center; justify-content: center; font-weight: bold;
+            border: 1px solid #ccc; font-size: 14px;
+        }
+        .recent-num.latest { background: var(--accent); border-color: #d4ac0d; transform: scale(1.1); }
+
         .bingo-board { display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px; width: 100%; max-width: 400px; background: white; padding: 10px; border-radius: 10px; }
         .cell { aspect-ratio: 1; border: 1px solid #ddd; border-radius: 5px; display: flex; align-items: center; justify-content: center; font-weight: bold; cursor: pointer; }
         .cell.marked { background: var(--accent); }
         .cell.free { background: var(--success); color: white; font-size: 10px; }
-        .win-btn { width: 100%; max-width: 400px; padding: 15px; margin-top: 20px; background: var(--danger); color: white; border: none; border-radius: 50px; font-weight: bold; font-size: 1.2rem; }
+        .win-btn { width: 100%; max-width: 400px; padding: 15px; margin-top: 20px; background: var(--danger); color: white; border: none; border-radius: 50px; font-weight: bold; font-size: 1.2rem; cursor: pointer; }
         
-        /* Waiting Overlay */
         #waiting-overlay {
             display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: rgba(0,0,0,0.9); color: white; flex-direction: column; align-items: center; justify-content: center; z-index: 1000; text-align: center;
@@ -31,6 +46,15 @@
     </div>
 
     <h1>BINGO</h1>
+
+    <!-- LIVE RECENT CALLS SECTION -->
+    <div class="recent-calls-container">
+        <div class="recent-label">RECENTLY CALLED NUMBERS</div>
+        <div id="recent-list">
+            <!-- Numbers will pop up here automatically -->
+        </div>
+    </div>
+
     <div class="bingo-board" id="board"></div>
     <button class="win-btn" onclick="claimBingo()">BINGO! 🏆</button>
 
@@ -38,6 +62,38 @@
         const tg = window.Telegram.WebApp;
         tg.expand();
 
+        // REPLACE THIS with your actual Render URL later
+        const RENDER_URL = "https://your-bot-name.onrender.com/get_numbers";
+
+        // 1. Function to fetch numbers from your Bot automatically
+        async function fetchLiveNumbers() {
+            try {
+                const response = await fetch(RENDER_URL);
+                const data = await response.json();
+                if (data.recent) {
+                    updateDisplay(data.recent);
+                }
+            } catch (err) {
+                console.log("Waiting for game to start...");
+            }
+        }
+
+        function updateDisplay(numbers) {
+            const list = document.getElementById('recent-list');
+            list.innerHTML = '';
+            numbers.forEach((num, index) => {
+                const div = document.createElement('div');
+                div.className = 'recent-num' + (index === 0 ? ' latest' : '');
+                div.textContent = num;
+                list.appendChild(div);
+            });
+        }
+
+        // Check for new numbers every 5 seconds
+        setInterval(fetchLiveNumbers, 5000);
+        fetchLiveNumbers(); // Initial check
+
+        // 2. Bingo Grid Generation
         function getRandom(min, max, count) {
             let arr = [];
             while(arr.length < count) {
@@ -63,7 +119,10 @@
                     cell.classList.add('free', 'marked');
                 } else {
                     cell.textContent = val;
-                    cell.onclick = () => cell.classList.toggle('marked');
+                    cell.onclick = () => {
+                        cell.classList.toggle('marked');
+                        tg.HapticFeedback.impactOccurred('light');
+                    };
                 }
                 boardElement.appendChild(cell);
             });
@@ -73,13 +132,16 @@
             const marked = Array.from(document.querySelectorAll('.cell.marked')).map(c => c.textContent);
             if(marked.length < 5) return tg.showAlert("Mark at least 5 numbers!");
 
-            document.getElementById('waiting-overlay').style.display = 'flex';
-
-            tg.sendData(JSON.stringify({
-                action: "claim_bingo",
-                user: tg.initDataUnsafe.user?.username || "Player",
-                numbers: marked
-            }));
+            tg.showConfirm("Submit this card for verification?", (ok) => {
+                if(ok) {
+                    document.getElementById('waiting-overlay').style.display = 'flex';
+                    tg.sendData(JSON.stringify({
+                        action: "claim_bingo",
+                        user: tg.initDataUnsafe.user?.first_name || "Player",
+                        numbers: marked
+                    }));
+                }
+            });
         }
     </script>
 </body>
