@@ -11,17 +11,18 @@ from flask_cors import CORS
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler, ContextTypes
 
-# --- FLASK SERVER & LIVE API ---
+# --- FLASK SERVER ---
 app = Flask(__name__)
 CORS(app) 
 
 @app.route('/')
 def home():
-    return "Professional Bingo Engine is Online"
+    return "Bingo Engine Status: ONLINE"
 
 @app.route('/get_numbers')
 def get_numbers():
     global called_numbers, game_active
+    # Returns an empty list if reset has been hit
     return jsonify({
         "recent": called_numbers[-5:][::-1], 
         "active": game_active
@@ -30,14 +31,6 @@ def get_numbers():
 def run_flask():
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
-
-def keep_alive():
-    while True:
-        try:
-            requests.get("https://tbingo-game-4.onrender.com")
-        except:
-            pass
-        time.sleep(600)
 
 # --- CONFIGURATION ---
 TOKEN = os.getenv("BOT_TOKEN")
@@ -63,6 +56,9 @@ def init_db():
 
 def get_horizontal_board():
     global last_called, called_numbers
+    if not called_numbers:
+        return "📊 **BOARD IS CURRENTLY EMPTY**"
+        
     rows = {"✨ B": [], "✨ I": [], "✨ N": [], "✨ G": [], "✨ O": []}
     for n in sorted(called_numbers):
         letter = "B" if 1<=n<=15 else "I" if 16<=n<=30 else "N" if 31<=n<=45 else "G" if 46<=n<=60 else "O"
@@ -75,54 +71,34 @@ def get_horizontal_board():
         board_str += f"**{letter}** | {num_list}\n"
     return board_str
 
-def verify_claim(player_numbers):
-    try:
-        marked = []
-        for n in player_numbers:
-            if str(n).upper() == "FREE":
-                marked.append("FREE")
-            elif str(n).isdigit():
-                marked.append(int(n))
-        
-        actual_marked = [n for n in marked if isinstance(n, int)]
-        if len(marked) < 5:
-            return False, "Not enough numbers for a Bingo."
-
-        invalid_nums = [n for n in actual_marked if n not in called_numbers]
-        if invalid_nums:
-            return False, f"Numbers not called yet: {', '.join(map(str, invalid_nums))}"
-
-        return True, "VALID BINGO DETECTED ✅"
-    except Exception as e:
-        return False, f"Error verifying: {e}"
-
 # --- HANDLERS ---
 
 async def web_app_data_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global game_active
-    data = json.loads(update.effective_message.web_app_data.data)
-    
-    if data.get("action") == "claim_bingo":
-        username = data.get("user", "Unknown")
-        numbers = data.get("numbers", [])
-        user_id = update.effective_user.id
-        game_active = False 
+    try:
+        data = json.loads(update.effective_message.web_app_data.data)
+        if data.get("action") == "claim_bingo":
+            username = data.get("user", "Unknown")
+            numbers = data.get("numbers", [])
+            user_id = update.effective_user.id
+            
+            game_active = False 
+            
+            await context.bot.send_message(
+                chat_id=GROUP_CHAT_ID, 
+                text=f"⏸ **GAME PAUSED**\n\n@{username} has clicked BINGO! Checking card now..."
+            )
 
-        await context.bot.send_message(
-            chat_id=GROUP_CHAT_ID, 
-            text=f"⏸ **GAME PAUSED**\n\n@{username} is claiming a BINGO! Admin checking..."
-        )
-
-        is_valid, reason = verify_claim(numbers)
-        status_emoji = "✅" if is_valid else "⚠️"
-        admin_msg = (
-            f"🧐 **VERIFICATION**\nPlayer: @{username}\nStatus: {status_emoji} {reason}\n"
-            f"Marked: {', '.join(map(str, numbers))}\nLast called: {last_called}"
-        )
-        
-        kb = [[InlineKeyboardButton("🏆 CONFIRM", callback_data=f"win_{user_id}_{username}"),
-               InlineKeyboardButton("❌ REJECT", callback_data=f"lose_{user_id}_{username}")]]
-        await context.bot.send_message(chat_id=ADMIN_ID, text=admin_msg, reply_markup=InlineKeyboardMarkup(kb))
+            kb = [[InlineKeyboardButton("🏆 CONFIRM WIN", callback_data=f"win_{user_id}_{username}"),
+                   InlineKeyboardButton("❌ REJECT CLAIM", callback_data=f"lose_{user_id}_{username}")]]
+            
+            await context.bot.send_message(
+                chat_id=ADMIN_ID, 
+                text=f"🧐 **VERIFICATION REQUEST**\n\nPlayer: @{username}\nMarked: {', '.join(map(str, numbers))}\n\nCheck against board!",
+                reply_markup=InlineKeyboardMarkup(kb)
+            )
+    except Exception as e:
+        logging.error(f"WebApp Data Error: {e}")
 
 async def auto_caller(context: ContextTypes.DEFAULT_TYPE):
     global called_numbers, last_called, game_active
@@ -130,7 +106,7 @@ async def auto_caller(context: ContextTypes.DEFAULT_TYPE):
 
     if len(called_numbers) >= 75:
         game_active = False
-        await context.bot.send_message(chat_id=GROUP_CHAT_ID, text="🏁 **Game over!**")
+        await context.bot.send_message(chat_id=GROUP_CHAT_ID, text="🏁 **FULL BOARD! Game over!**")
         return
 
     num = random.randint(1, 75)
@@ -151,36 +127,51 @@ async def start_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
     called_numbers = []
     last_called = None
     
-    kb = [[InlineKeyboardButton("⏸ Pause", callback_data="adm_pause"), 
-           InlineKeyboardButton("▶️ Resume", callback_data="adm_resume")],
-          [InlineKeyboardButton("♻️ Reset Game", callback_data="adm_reset")]]
+    rules = (
+        "🚀 **BINGO GAME BEGINNING!**\n\n"
+        "🏠 **HOUSE RULES:**\n"
+        "1. First to get a full line (Horizontal, Vertical, or Diagonal) wins!\n"
+        "2. You must click the BINGO button to claim.\n"
+        "3. Admin decision is final.\n\n"
+        "🎮 **Click the 'Play Bingo' button below to get your card!**"
+    )
     
-    await context.bot.send_message(chat_id=GROUP_CHAT_ID, text="🚀 **BINGO STARTED!**", reply_markup=InlineKeyboardMarkup(kb))
-    context.job_queue.run_repeating(auto_caller, interval=10, first=1, name="bingo_job")
+    group_kb = [[InlineKeyboardButton("🎮 Play Bingo", web_app=WebAppInfo(url=GAME_URL))]]
+    
+    await context.bot.send_message(
+        chat_id=GROUP_CHAT_ID, 
+        text=rules, 
+        reply_markup=InlineKeyboardMarkup(group_kb)
+    )
+
+    admin_kb = [[InlineKeyboardButton("⏸ Pause", callback_data="adm_pause"), 
+                 InlineKeyboardButton("▶️ Resume", callback_data="adm_resume")],
+                [InlineKeyboardButton("♻️ Full Reset", callback_data="adm_reset")]]
+    
+    await context.bot.send_message(chat_id=ADMIN_ID, text="🕹 **ADMIN CONTROL PANEL**", reply_markup=InlineKeyboardMarkup(admin_kb))
+    
+    for job in context.job_queue.get_jobs_by_name("bingo_job"): job.schedule_removal()
+    context.job_queue.run_repeating(auto_caller, interval=12, first=1, name="bingo_job")
 
 async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global game_active, called_numbers, last_called
     query = update.callback_query
-    if query.from_user.id != ADMIN_ID:
-        await query.answer("You are not the Admin!", show_alert=True)
-        return
-        
+    if query.from_user.id != ADMIN_ID: return
     await query.answer()
+
     data = query.data.split("_")
 
-    # Win/Loss Handling
     if data[0] == "win":
         game_active = False
         for job in context.job_queue.get_jobs_by_name("bingo_job"): job.schedule_removal()
-        await context.bot.send_message(chat_id=GROUP_CHAT_ID, text=f"🎊 **WINNER: @{data[2]}!** 🏆")
-        await query.edit_message_text(text=f"✅ Confirmed @{data[2]}")
+        await context.bot.send_message(chat_id=GROUP_CHAT_ID, text=f"🎊 **WE HAVE A WINNER!**\nCongratulations @{data[2]}! 🏆")
+        await query.edit_message_text(text=f"✅ Victory Confirmed for @{data[2]}")
 
     elif data[0] == "lose":
         game_active = True 
-        await context.bot.send_message(chat_id=GROUP_CHAT_ID, text=f"❌ @{data[2]} invalid claim. ▶️ Resuming...")
-        await query.edit_message_text(text=f"❌ Rejected @{data[2]}")
+        await context.bot.send_message(chat_id=GROUP_CHAT_ID, text=f"❌ @{data[2]}'s claim was invalid.\n▶️ **RESUMING GAME...**")
+        await query.edit_message_text(text=f"❌ Claim Rejected for @{data[2]}")
 
-    # Control Panel Handling
     elif data[1] == "pause":
         game_active = False
         await context.bot.send_message(chat_id=GROUP_CHAT_ID, text="⏸ **GAME PAUSED BY ADMIN**")
@@ -190,24 +181,29 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(chat_id=GROUP_CHAT_ID, text="▶️ **GAME RESUMED**")
 
     elif data[1] == "reset":
+        # --- AUTOMATIC ERASE LOGIC ---
         game_active = False
-        called_numbers = []
-        last_called = None
-        for job in context.job_queue.get_jobs_by_name("bingo_job"): job.schedule_removal()
-        await context.bot.send_message(chat_id=GROUP_CHAT_ID, text="♻️ **GAME RESET BY ADMIN.** Previous data cleared.")
+        called_numbers = [] # Clears all called numbers
+        last_called = None  # Clears last number reference
+        
+        # Stops the automatic number calling job
+        for job in context.job_queue.get_jobs_by_name("bingo_job"): 
+            job.schedule_removal()
+            
+        await context.bot.send_message(chat_id=GROUP_CHAT_ID, text="♻️ **GAME RESET BY ADMIN.**\nAll numbers have been erased from the board.")
+        await query.edit_message_text(text="♻️ Game State Erased & Reset Successful.")
 
 def main():
     init_db()
     threading.Thread(target=run_flask, daemon=True).start()
-    threading.Thread(target=keep_alive, daemon=True).start()
-    time.sleep(2)
+    
+    requests.get(f"https://api.telegram.org/bot{TOKEN}/deleteWebhook")
     
     application = Application.builder().token(TOKEN).build()
     application.add_handler(CommandHandler("play", start_game))
     application.add_handler(CallbackQueryHandler(admin_callback))
     application.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, web_app_data_handler))
     
-    print("Bingo Bot with Admin Panel is LIVE")
     application.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
