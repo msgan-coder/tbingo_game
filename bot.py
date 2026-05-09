@@ -1,177 +1,86 @@
-import logging
-import sqlite3
-import os
-import random
-import threading
-import time
-import requests
-import json
-from flask import Flask
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler, ContextTypes
-
-# --- FLASK SERVER & KEEP-ALIVE ---
-app = Flask('')
-
-@app.route('/')
-def home():
-    return "Bingo Bot is Awake"
-
-def run_flask():
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
-
-def keep_alive():
-    while True:
-        try:
-            requests.get("https://tbingo-game-4.onrender.com")
-        except:
-            pass
-        time.sleep(600)
-
-# --- CONFIGURATION ---
-TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_ID = 5431140655
-GROUP_CHAT_ID = -1003988432330 
-GAME_URL = "https://msgan-coder.github.io/tbingo_game/"
-
-game_active = False
-called_numbers = []
-last_called = None
-
-logging.basicConfig(level=logging.INFO)
-
-def init_db():
-    conn = sqlite3.connect("bingo.db")
-    conn.execute("CREATE TABLE IF NOT EXISTS players (user_id INTEGER PRIMARY KEY, username TEXT, status TEXT)")
-    conn.commit()
-    conn.close()
-
-def get_horizontal_board():
-    global last_called, called_numbers
-    rows = {"✨ B": [], "✨ I": [], "✨ N": [], "✨ G": [], "✨ O": []}
-    for n in called_numbers:
-        letter = "B" if 1<=n<=15 else "I" if 16<=n<=30 else "N" if 31<=n<=45 else "G" if 46<=n<=60 else "O"
-        display = f"{n}X" if n == last_called else str(n)
-        rows[f"✨ {letter}"].append(display)
-    
-    board_str = "📊 **CALLED NUMBERS BOARD**\n`-------------------------`\n"
-    for letter, nums in rows.items():
-        num_list = ", ".join(nums) if nums else "---"
-        board_str += f"**{letter}** | {num_list}\n"
-    return board_str
-
-# --- HANDLERS ---
-
-async def web_app_data_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global game_active
-    data = json.loads(update.effective_message.web_app_data.data)
-    
-    if data.get("action") == "claim_bingo":
-        username = data.get("user", "Unknown")
-        numbers = data.get("numbers", [])
-        user_id = update.effective_user.id
-
-        # 1. PAUSE THE GAME
-        game_active = False 
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Bingo Online</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        :root { --primary: #2c3e50; --accent: #f1c40f; --success: #2ecc71; --danger: #e74c3c; }
+        body { font-family: sans-serif; background: #f0f2f5; padding: 20px; display: flex; flex-direction: column; align-items: center; }
+        .bingo-board { display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px; width: 100%; max-width: 400px; background: white; padding: 10px; border-radius: 10px; }
+        .cell { aspect-ratio: 1; border: 1px solid #ddd; border-radius: 5px; display: flex; align-items: center; justify-content: center; font-weight: bold; cursor: pointer; }
+        .cell.marked { background: var(--accent); }
+        .cell.free { background: var(--success); color: white; font-size: 10px; }
+        .win-btn { width: 100%; max-width: 400px; padding: 15px; margin-top: 20px; background: var(--danger); color: white; border: none; border-radius: 50px; font-weight: bold; font-size: 1.2rem; }
         
-        # 2. GROUP ANNOUNCEMENT
-        await context.bot.send_message(
-            chat_id=GROUP_CHAT_ID, 
-            text=f"⏸ **CALLING PAUSED**\n\nChecking @{username}'s Bingo card... Please wait."
-        )
+        /* Waiting Overlay */
+        #waiting-overlay {
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.9); color: white; flex-direction: column; align-items: center; justify-content: center; z-index: 1000; text-align: center;
+        }
+    </style>
+</head>
+<body>
 
-        # 3. ADMIN VERIFICATION
-        msg = f"🧐 **VERIFY CLAIM**\nUser: @{username}\nMarked: {', '.join(map(str, numbers))}"
-        kb = [[
-            InlineKeyboardButton("✅ WINNER", callback_data=f"win_{user_id}_{username}"),
-            InlineKeyboardButton("❌ LOSE", callback_data=f"lose_{user_id}_{username}")
-        ]]
-        await context.bot.send_message(chat_id=ADMIN_ID, text=msg, reply_markup=InlineKeyboardMarkup(kb))
+    <div id="waiting-overlay">
+        <h2 style="color: var(--accent);">VERIFYING CARD...</h2>
+        <p>The Admin is checking your Bingo claim.</p>
+        <p>Please wait for the notification in chat!</p>
+        <button onclick="tg.close()" style="margin-top:20px; padding:10px 20px;">Return to Telegram</button>
+    </div>
 
-async def auto_caller(context: ContextTypes.DEFAULT_TYPE):
-    global called_numbers, last_called, game_active
-    if not game_active: return
+    <h1>BINGO</h1>
+    <div class="bingo-board" id="board"></div>
+    <button class="win-btn" onclick="claimBingo()">BINGO! 🏆</button>
 
-    if len(called_numbers) >= 75:
-        game_active = False
-        await context.bot.send_message(chat_id=GROUP_CHAT_ID, text="🏁 **BOARD FULL! Round Ended.**")
-        return
+    <script>
+        const tg = window.Telegram.WebApp;
+        tg.expand();
 
-    num = random.randint(1, 75)
-    while num in called_numbers: num = random.randint(1, 75)
-    
-    last_called = num
-    called_numbers.append(num)
-    letter = "B" if num<=15 else "I" if num<=30 else "N" if num<=45 else "G" if num<=60 else "O"
-    msg = f"🔔 **NEW NUMBER: {letter}-{last_called}**\n\n{get_horizontal_board()}"
-    await context.bot.send_message(chat_id=GROUP_CHAT_ID, text=msg, parse_mode="Markdown")
+        function getRandom(min, max, count) {
+            let arr = [];
+            while(arr.length < count) {
+                let r = Math.floor(Math.random() * (max - min + 1)) + min;
+                if(!arr.includes(r)) arr.push(r);
+            }
+            return arr;
+        }
 
-async def start_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global game_active, called_numbers, last_called
-    if update.effective_user.id != ADMIN_ID: return
-    
-    game_active = True
-    called_numbers = []
-    last_called = None
-    
-    await context.bot.send_message(chat_id=GROUP_CHAT_ID, text="🚀 **BINGO START!**")
-    context.job_queue.run_repeating(auto_caller, interval=8, first=2, name="bingo_job")
+        const boardElement = document.getElementById('board');
+        const columns = {
+            'B': getRandom(1, 15, 5), 'I': getRandom(16, 30, 5),
+            'N': getRandom(31, 45, 5), 'G': getRandom(46, 60, 5), 'O': getRandom(61, 75, 5)
+        };
 
-async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global game_active, called_numbers
-    query = update.callback_query
-    await query.answer()
-    data = query.data.split("_")
+        for (let r = 0; r < 5; r++) {
+            ['B','I','N','G','O'].forEach((col, i) => {
+                const cell = document.createElement('div');
+                cell.className = 'cell';
+                let val = columns[col][r];
+                if (r === 2 && i === 2) {
+                    cell.textContent = "FREE";
+                    cell.classList.add('free', 'marked');
+                } else {
+                    cell.textContent = val;
+                    cell.onclick = () => cell.classList.toggle('marked');
+                }
+                boardElement.appendChild(cell);
+            });
+        }
 
-    if data[0] == "win":
-        user_id, username = data[1], data[2]
-        game_active = False
-        for job in context.job_queue.get_jobs_by_name("bingo_job"): job.schedule_removal()
-        
-        # Reset DB for next round
-        conn = sqlite3.connect("bingo.db")
-        conn.execute("DELETE FROM players")
-        conn.commit()
-        conn.close()
+        function claimBingo() {
+            const marked = Array.from(document.querySelectorAll('.cell.marked')).map(c => c.textContent);
+            if(marked.length < 5) return tg.showAlert("Mark at least 5 numbers!");
 
-        await context.bot.send_message(chat_id=GROUP_CHAT_ID, text=f"🎊 **CONGRATULATIONS @{username}!**\nYou won this round! 🏆")
-        await context.bot.send_message(chat_id=user_id, text="🥳 **YOU WON!** Admin will contact you.")
-        await query.edit_message_text(text=f"✅ Win confirmed for @{username}")
+            document.getElementById('waiting-overlay').style.display = 'flex';
 
-    elif data[0] == "lose":
-        user_id, username = data[1], data[2]
-        game_active = True # RESUME CALLING
-        await context.bot.send_message(chat_id=GROUP_CHAT_ID, text=f"❌ @{username} card rejected.\n▶️ **RESUMING GAME...**")
-        await context.bot.send_message(chat_id=user_id, text="❌ **SORRY!** Your claim was rejected.")
-        await query.edit_message_text(text=f"❌ Rejected claim from @{username}")
-
-    elif data[0] == "app":
-        user_id, username = int(data[1]), data[2]
-        conn = sqlite3.connect("bingo.db")
-        conn.execute("INSERT OR REPLACE INTO players VALUES (?, ?, 'PAID')", (user_id, username))
-        conn.commit()
-        conn.close()
-        kb = [[InlineKeyboardButton("🎮 Play Bingo", web_app=WebAppInfo(url=GAME_URL))]]
-        await context.bot.send_message(chat_id=user_id, text="✅ Approved!", reply_markup=InlineKeyboardMarkup(kb))
-        await query.edit_message_caption(caption=f"✅ Approved: @{username}")
-
-async def handle_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    photo_id = update.message.photo[-1].file_id
-    kb = [[InlineKeyboardButton("✅ Approve", callback_data=f"app_{user.id}_{user.username}")]]
-    await context.bot.send_photo(chat_id=ADMIN_ID, photo=photo_id, caption=f"💰 From: @{user.username}", reply_markup=InlineKeyboardMarkup(kb))
-
-def main():
-    init_db()
-    threading.Thread(target=run_flask, daemon=True).start()
-    threading.Thread(target=keep_alive, daemon=True).start()
-    application = Application.builder().token(TOKEN).build()
-    application.add_handler(CommandHandler("play", start_game))
-    application.add_handler(CallbackQueryHandler(admin_callback))
-    application.add_handler(MessageHandler(filters.PHOTO, handle_screenshot))
-    application.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, web_app_data_handler))
-    application.run_polling()
-
-if __name__ == "__main__":
-    main()
+            tg.sendData(JSON.stringify({
+                action: "claim_bingo",
+                user: tg.initDataUnsafe.user?.username || "Player",
+                numbers: marked
+            }));
+        }
+    </script>
+</body>
+</html>
