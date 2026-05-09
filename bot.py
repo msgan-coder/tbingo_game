@@ -73,24 +73,21 @@ def get_horizontal_board():
 # --- HANDLERS ---
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Greeting for when users open the bot link directly"""
     welcome_text = (
         "👋 **Welcome to T-Bingo!**\n\n"
         "💰 **Entry Fee:** 10 ETB per game.\n"
         "🏦 **Bank:** CBE (Commercial Bank of Ethiopia)\n"
         "🔢 **Account:** `1000141291193`\n\n"
-        "📸 Please send a screenshot of your transfer to the Admin for verification before joining the group game."
+        "📸 Please send a screenshot of your transfer here for Admin verification."
     )
     await update.message.reply_text(welcome_text, parse_mode="Markdown")
 
 async def handle_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Detects photos and sends them to Admin for approval"""
     user = update.effective_user
-    photo_id = update.message.photo[-1].file_id # Get the highest quality photo
+    photo_id = update.message.photo[-1].file_id 
     
     await update.message.reply_text("✅ Screenshot received! Please wait while the Admin verifies your payment.")
 
-    # Verification buttons for Admin
     kb = [
         [
             InlineKeyboardButton("✅ Approve", callback_data=f"pay_approve_{user.id}_{user.username}"),
@@ -163,21 +160,11 @@ async def start_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🚀 **NEW BINGO GAME STARTING!**\n\n"
         "💳 **ENTRY FEE:** 10 ETB\n"
         "🏦 **CBE:** `1000141291193`\n"
-        "📩 Send screenshots to Admin for approval.\n\n"
-        "🏠 **HOUSE RULES:**\n"
-        "1. First full line (Any direction) wins!\n"
-        "2. You must click BINGO to claim.\n\n"
-        "🎮 **Click below to get your card!**"
+        "📩 Send screenshots to the BOT privately for approval.\n\n"
+        "🎮 **Once approved, the bot will send you your play button!**"
     )
     
-    group_kb = [[InlineKeyboardButton("🎮 Play Bingo", web_app=WebAppInfo(url=GAME_URL))]]
-    
-    await context.bot.send_message(
-        chat_id=GROUP_CHAT_ID, 
-        text=rules, 
-        reply_markup=InlineKeyboardMarkup(group_kb),
-        parse_mode="Markdown"
-    )
+    await context.bot.send_message(chat_id=GROUP_CHAT_ID, text=rules, parse_mode="Markdown")
 
     admin_kb = [[InlineKeyboardButton("⏸ Pause", callback_data="adm_pause"), 
                  InlineKeyboardButton("▶️ Resume", callback_data="adm_resume")],
@@ -201,7 +188,14 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         target_id = data[2]
         target_name = data[3]
         if data[1] == "approve":
-            await context.bot.send_message(chat_id=target_id, text="✅ **Payment Approved!** You are now cleared to join the game.")
+            # --- FIX: Send the Play Button directly to the player ---
+            play_kb = [[InlineKeyboardButton("🎮 Play Bingo", web_app=WebAppInfo(url=GAME_URL))]]
+            await context.bot.send_message(
+                chat_id=target_id, 
+                text="✅ **Payment Approved!**\nClick the button below to get your card. Good luck!",
+                reply_markup=InlineKeyboardMarkup(play_kb),
+                parse_mode="Markdown"
+            )
             await query.edit_message_caption(caption=f"✅ Payment Approved for @{target_name}")
         elif data[1] == "reject":
             await context.bot.send_message(chat_id=target_id, text="❌ **Payment Rejected.** Please send a valid screenshot of the 10 ETB transfer.")
@@ -243,13 +237,10 @@ def main():
     
     application = Application.builder().token(TOKEN).build()
     
-    # Handlers
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("play", start_game))
     application.add_handler(CallbackQueryHandler(admin_callback))
     application.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, web_app_data_handler))
-    
-    # Listen for Photos (Screenshots)
     application.add_handler(MessageHandler(filters.PHOTO, handle_screenshot))
     
     application.run_polling(drop_pending_updates=True)
