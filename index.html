@@ -8,32 +8,17 @@
     <style>
         :root { --primary: #2c3e50; --accent: #f1c40f; --success: #2ecc71; --danger: #e74c3c; }
         body { font-family: sans-serif; background: #f0f2f5; padding: 15px; display: flex; flex-direction: column; align-items: center; }
-        
-        /* Recent Calls Bar Styling */
-        .recent-calls-container {
-            width: 100%; max-width: 400px; background: white; padding: 10px;
-            border-radius: 10px; margin-bottom: 15px; text-align: center;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-        }
+        .recent-calls-container { width: 100%; max-width: 400px; background: white; padding: 10px; border-radius: 10px; margin-bottom: 15px; text-align: center; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
         .recent-label { font-size: 12px; font-weight: bold; color: #777; margin-bottom: 8px; }
         #recent-list { display: flex; justify-content: center; gap: 8px; min-height: 40px; }
-        .recent-num { 
-            width: 35px; height: 35px; border-radius: 50%; background: #eee; 
-            display: flex; align-items: center; justify-content: center; font-weight: bold;
-            border: 1px solid #ccc; font-size: 14px;
-        }
+        .recent-num { width: 35px; height: 35px; border-radius: 50%; background: #eee; display: flex; align-items: center; justify-content: center; font-weight: bold; border: 1px solid #ccc; font-size: 14px; }
         .recent-num.latest { background: var(--accent); border-color: #d4ac0d; transform: scale(1.1); }
-
         .bingo-board { display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px; width: 100%; max-width: 400px; background: white; padding: 10px; border-radius: 10px; }
-        .cell { aspect-ratio: 1; border: 1px solid #ddd; border-radius: 5px; display: flex; align-items: center; justify-content: center; font-weight: bold; cursor: pointer; }
+        .cell { aspect-ratio: 1; border: 1px solid #ddd; border-radius: 5px; display: flex; align-items: center; justify-content: center; font-weight: bold; cursor: pointer; font-size: 18px; }
         .cell.marked { background: var(--accent); }
         .cell.free { background: var(--success); color: white; font-size: 10px; }
         .win-btn { width: 100%; max-width: 400px; padding: 15px; margin-top: 20px; background: var(--danger); color: white; border: none; border-radius: 50px; font-weight: bold; font-size: 1.2rem; cursor: pointer; }
-        
-        #waiting-overlay {
-            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0,0,0,0.9); color: white; flex-direction: column; align-items: center; justify-content: center; z-index: 1000; text-align: center;
-        }
+        #waiting-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); color: white; flex-direction: column; align-items: center; justify-content: center; z-index: 1000; text-align: center; }
     </style>
 </head>
 <body>
@@ -41,18 +26,14 @@
     <div id="waiting-overlay">
         <h2 style="color: var(--accent);">VERIFYING CARD...</h2>
         <p>The Admin is checking your Bingo claim.</p>
-        <p>Please wait for the notification in chat!</p>
         <button onclick="tg.close()" style="margin-top:20px; padding:10px 20px;">Return to Telegram</button>
     </div>
 
     <h1>BINGO</h1>
 
-    <!-- LIVE RECENT CALLS SECTION -->
     <div class="recent-calls-container">
-        <div class="recent-label">RECENTLY CALLED NUMBERS</div>
-        <div id="recent-list">
-            <!-- Numbers will pop up here automatically -->
-        </div>
+        <div class="recent-label">RECENTLY CALLED</div>
+        <div id="recent-list"></div>
     </div>
 
     <div class="bingo-board" id="board"></div>
@@ -62,20 +43,15 @@
         const tg = window.Telegram.WebApp;
         tg.expand();
 
-        // REPLACE THIS with your actual Render URL later
+        // IMPORTANT: Change this to your actual OnRender URL
         const RENDER_URL = "https://your-bot-name.onrender.com/get_numbers";
 
-        // 1. Function to fetch numbers from your Bot automatically
         async function fetchLiveNumbers() {
             try {
                 const response = await fetch(RENDER_URL);
                 const data = await response.json();
-                if (data.recent) {
-                    updateDisplay(data.recent);
-                }
-            } catch (err) {
-                console.log("Waiting for game to start...");
-            }
+                if (data.recent) updateDisplay(data.recent);
+            } catch (err) { console.log("Reconnecting..."); }
         }
 
         function updateDisplay(numbers) {
@@ -89,18 +65,16 @@
             });
         }
 
-        // Check for new numbers every 5 seconds
         setInterval(fetchLiveNumbers, 5000);
-        fetchLiveNumbers(); // Initial check
+        fetchLiveNumbers();
 
-        // 2. Bingo Grid Generation
         function getRandom(min, max, count) {
             let arr = [];
             while(arr.length < count) {
                 let r = Math.floor(Math.random() * (max - min + 1)) + min;
                 if(!arr.includes(r)) arr.push(r);
             }
-            return arr;
+            return arr.sort((a,b) => a-b);
         }
 
         const boardElement = document.getElementById('board');
@@ -129,16 +103,18 @@
         }
 
         function claimBingo() {
-            const marked = Array.from(document.querySelectorAll('.cell.marked')).map(c => c.textContent);
-            if(marked.length < 5) return tg.showAlert("Mark at least 5 numbers!");
+            const markedCells = Array.from(document.querySelectorAll('.cell.marked'));
+            const numbers = markedCells.map(c => c.textContent);
+            
+            if(numbers.length < 5) return tg.showAlert("Mark your numbers first!");
 
-            tg.showConfirm("Submit this card for verification?", (ok) => {
+            tg.showConfirm("Submit card?", (ok) => {
                 if(ok) {
                     document.getElementById('waiting-overlay').style.display = 'flex';
                     tg.sendData(JSON.stringify({
                         action: "claim_bingo",
                         user: tg.initDataUnsafe.user?.first_name || "Player",
-                        numbers: marked
+                        numbers: numbers
                     }));
                 }
             });
