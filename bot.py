@@ -22,6 +22,7 @@ GROUP_CHAT_ID = -1003988432330
 GAME_URL_BASE = "https://msgan-coder.github.io/tbingo_game/"
 
 app = Flask(__name__)
+# Enhanced CORS to prevent browser blocks
 CORS(app, resources={r"/*": {"origins": "*"}})
 
 # --- GLOBAL STATE ---
@@ -41,6 +42,7 @@ def health():
 @app.route('/get_numbers')
 def get_numbers():
     # Returns raw numbers as a text string: "49, 14, 13, 67, 75"
+    # We ignore the 't' parameter from the browser but it forces a fresh fetch
     clean_nums = [n.split('-')[1] for n in called_numbers[-5:][::-1]]
     return jsonify({
         "recent_text": ", ".join(clean_nums) if clean_nums else "Waiting...",
@@ -50,6 +52,7 @@ def get_numbers():
 
 @app.route('/claim_bingo', methods=['POST'])
 def claim_bingo():
+    global bot_app
     data = request.json
     user_name = data.get("user", "Player")
     user_id = data.get("user_id")
@@ -62,20 +65,23 @@ def claim_bingo():
             InlineKeyboardButton("❌ REJECT", callback_data=f"lose|{user_id}|{user_name}")
         ]]
         
+        # Bridge Flask to the Telegram Bot Loop
         asyncio.run_coroutine_threadsafe(
             bot_app.bot.send_message(
                 chat_id=ADMIN_ID,
-                text=f"🧐 **VERIFY CLAIM**\n\nPlayer: @{user_name}\nNumbers: {marked_nums}",
+                text=f"🚨 **BINGO CLAIMED**\n\nPlayer: @{user_name}\nID: {user_id}\nNumbers: {', '.join(marked_nums)}",
                 reply_markup=InlineKeyboardMarkup(keyboard)
             ), loop
         )
         asyncio.run_coroutine_threadsafe(
             bot_app.bot.send_message(
                 chat_id=GROUP_CHAT_ID,
-                text=f"⚠️ **BINGO!** @{user_name} is claiming a win! Verifying card..."
+                text=f"⚠️ **BINGO!** @{user_name} is claiming a win! Verifying..."
             ), loop
         )
-    return jsonify({"status": "received"})
+        return jsonify({"status": "received"}), 200
+    
+    return jsonify({"status": "error", "reason": "bot_not_ready"}), 500
 
 # --- BOT COMMANDS ---
 
