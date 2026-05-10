@@ -22,6 +22,9 @@ ADMIN_ID = 5431140655
 GROUP_CHAT_ID = -1003988432330 
 GAME_URL_BASE = "https://msgan-coder.github.io/tbingo_game/"
 
+# Global variable to hold the bot application instance
+bot_app = None
+
 logging.basicConfig(level=logging.INFO)
 
 @app.route('/get_numbers')
@@ -35,22 +38,37 @@ def get_numbers():
 
 @app.route('/claim_bingo', methods=['POST'])
 def claim_bingo():
-    global game_active
+    global game_active, bot_app
     data = request.json
     user_name = data.get("user", "Unknown")
     user_id = data.get("user_id")
     marked_nums = data.get("numbers", [])
     
-    # Check if the player is trying to claim on an old session
+    # Check session
     client_session = data.get("session_id")
     if client_session and client_session != game_session_id:
         return jsonify({"status": "expired", "message": "This game session has expired."})
 
     game_active = False # Pause calling
     
-    # Send to Admin
-    kb = [[InlineKeyboardButton("🏆 CONFIRM WIN", callback_data=f"win_{user_id}_{user_name}"),
-           InlineKeyboardButton("❌ REJECT", callback_data=f"lose_{user_id}_{user_name}")]]
+    # Send verification notification to Admin and Group
+    if bot_app:
+        loop = bot_app.loop
+        kb = [[InlineKeyboardButton("🏆 CONFIRM WIN", callback_data=f"win_{user_id}_{user_name}"),
+               InlineKeyboardButton("❌ REJECT", callback_data=f"lose_{user_id}_{user_name}")]]
+        
+        # Notify Admin
+        asyncio.run_coroutine_threadsafe(
+            bot_app.bot.send_message(
+                chat_id=ADMIN_ID, 
+                text=f"🧐 **VERIFY CLAIM: @{user_name}**\nNumbers marked: {marked_nums}",
+                reply_markup=InlineKeyboardMarkup(kb)
+            ), loop
+        )
+        # Notify Group
+        asyncio.run_coroutine_threadsafe(
+            bot_app.bot.send_message(chat_id=GROUP_CHAT_ID, text=f"⚠️ **BINGO CLAIMED by @{user_name}!**\nVerifying card..."), loop
+        )
     
     print(f"BINGO CLAIMED BY {user_name}")
     return jsonify({"status": "received"})
@@ -85,7 +103,7 @@ async def start_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     game_active = True
     called_numbers = []
-    game_session_id = str(int(time.time())) # Create a NEW session ID for this game
+    game_session_id = str(int(time.time())) 
     
     admin_kb = [[InlineKeyboardButton("⏸ Pause", callback_data="adm_pause"), 
                  InlineKeyboardButton("▶️ Resume", callback_data="adm_resume")],
@@ -103,15 +121,15 @@ async def auto_caller(context: ContextTypes.DEFAULT_TYPE):
 
     num = random.randint(1, 75)
     while num in called_numbers: num = random.randint(1, 75)
-    called_numbers.append(num)
     
-    # Prefix mapping
+    # Prefix mapping for clear listing
     if 1 <= num <= 15: letter = "B"
     elif 16 <= num <= 30: letter = "I"
     elif 31 <= num <= 45: letter = "N"
     elif 46 <= num <= 60: letter = "G"
     else: letter = "O"
 
+    called_numbers.append(f"{letter}-{num}")
     await context.bot.send_message(chat_id=GROUP_CHAT_ID, text=f"🔔 **{letter}-{num}**")
 
 async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -119,9 +137,7 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     data = query.data.split("_")
     
-    # Approval Logic with Session-specific URL
     if data[0] == "pay" and data[1] == "app":
-        # We append the session ID to the URL as a parameter
         current_url = f"{GAME_URL_BASE}?s={game_session_id}"
         play_kb = [[InlineKeyboardButton("🎮 Play Bingo", web_app=WebAppInfo(url=current_url))]]
         await context.bot.send_message(chat_id=data[2], text="✅ Payment Approved! Click below to play this round.", reply_markup=InlineKeyboardMarkup(play_kb))
@@ -135,16 +151,13 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         game_active = True
         await context.bot.send_message(chat_id=GROUP_CHAT_ID, text="▶️ Game Resumed.")
 
-    # Winner Confirmation and New Round Prompt
     elif data[0] == "win":
         winner_name = data[2]
         await context.bot.send_message(chat_id=GROUP_CHAT_ID, text=f"🎊 **WINNER: @{winner_name}!** 🏆")
         
-        # End current session
         game_active = False
         for job in context.job_queue.get_jobs_by_name("bingo_job"): job.schedule_removal()
         
-        # Ask for new payments
         new_round_text = (
             "🏁 **Game Over!**\n\n"
             "To play the next round, please pay **10 ETB** and send your screenshot to the bot.\n"
@@ -152,13 +165,21 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await context.bot.send_message(chat_id=GROUP_CHAT_ID, text=new_round_text)
         await query.edit_message_text(text=f"✅ Winner confirmed: @{winner_name}")
+    
+    elif data[0] == "lose":
+        await context.bot.send_message(chat_id=GROUP_CHAT_ID, text="❌ **Bingo Rejected.** Game continues!")
+        game_active = True
+        await query.delete_message()
 
     await query.answer()
 
 def main():
+    global bot_app
     token = os.getenv("BOT_TOKEN")
     threading.Thread(target=run_flask, daemon=True).start()
+    
     application = Application.builder().token(token).build()
+    bot_app = application # Reference for Flask
     
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("play", start_game))
