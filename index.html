@@ -11,7 +11,7 @@
         h1 { margin: 10px 0; color: var(--primary); }
         .recent-calls-container { width: 95%; background: white; padding: 10px; border-radius: 10px; margin-bottom: 15px; text-align: center; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
         #recent-list { display: flex; justify-content: center; gap: 8px; min-height: 40px; }
-        .recent-num { width: 35px; height: 35px; border-radius: 50%; background: #eee; display: flex; align-items: center; justify-content: center; font-weight: bold; border: 1px solid #ccc; }
+        .recent-num { width: 35px; height: 35px; border-radius: 50%; background: #eee; display: flex; align-items: center; justify-content: center; font-weight: bold; border: 1px solid #ccc; font-size: 0.9rem; }
         .recent-num.latest { background: var(--accent); border-color: #d4ac0d; transform: scale(1.1); }
         .bingo-board { display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px; width: 95%; background: white; padding: 10px; border-radius: 10px; }
         .cell { aspect-ratio: 1; border: 1px solid #ddd; border-radius: 5px; display: flex; align-items: center; justify-content: center; font-weight: bold; cursor: pointer; background: #fff; font-size: 1.2rem; }
@@ -26,13 +26,14 @@
     <div id="waiting-overlay">
         <h2 style="color: var(--accent);">VERIFYING...</h2>
         <p>Admin is checking your card.</p>
-        <button onclick="window.location.reload()" style="padding:10px;">Retry</button>
+        <button onclick="window.location.reload()" style="padding:10px; margin-top:10px;">Back to Game</button>
     </div>
 
     <h1>T-BINGO</h1>
 
     <div class="recent-calls-container">
-        <div id="recent-list"></div>
+        <strong>Recent Numbers</strong>
+        <div id="recent-list" style="margin-top:5px;"></div>
     </div>
 
     <div class="bingo-board" id="board"></div>
@@ -43,23 +44,29 @@
         tg.expand();
 
         const BASE_URL = "https://tbingo-game-4.onrender.com"; 
+        let currentSessionId = "";
 
         // 1. Fetch Numbers
         async function fetchLiveNumbers() {
             try {
                 const response = await fetch(`${BASE_URL}/get_numbers`);
                 const data = await response.json();
+                
+                // Store session ID to prevent old game claims
+                currentSessionId = data.session_id;
+
                 if (data.recent) {
                     const list = document.getElementById('recent-list');
                     list.innerHTML = '';
                     data.recent.forEach((num, i) => {
                         const div = document.createElement('div');
                         div.className = 'recent-num' + (i === 0 ? ' latest' : '');
-                        div.textContent = num;
+                        // If number is "B-5", this displays just "5" to fit the circle
+                        div.textContent = num; 
                         list.appendChild(div);
                     });
                 }
-            } catch (e) { console.log("Sync..."); }
+            } catch (e) { console.log("Syncing with server..."); }
         }
         setInterval(fetchLiveNumbers, 4000);
         fetchLiveNumbers();
@@ -102,9 +109,9 @@
         // 3. Claim Bingo
         async function claimBingo() {
             const marked = Array.from(document.querySelectorAll('.cell.marked')).map(c => c.textContent);
-            if(marked.length < 5) return tg.showAlert("Need 5 numbers!");
+            if(marked.length < 5) return tg.showAlert("You need at least 5 marked numbers!");
 
-            tg.showConfirm("Submit Claim?", async (ok) => {
+            tg.showConfirm("Submit BINGO claim to Admin?", async (ok) => {
                 if(ok) {
                     document.getElementById('waiting-overlay').style.display = 'flex';
                     try {
@@ -114,11 +121,13 @@
                             body: JSON.stringify({
                                 user: tg.initDataUnsafe.user?.username || "Player",
                                 user_id: tg.initDataUnsafe.user?.id,
-                                numbers: marked
+                                numbers: marked,
+                                session_id: currentSessionId // Vital for verification
                             })
                         });
                     } catch (err) {
-                        tg.showAlert("Server Error. Try again.");
+                        tg.showAlert("Connection lost. Please check your internet.");
+                        document.getElementById('waiting-overlay').style.display = 'none';
                     }
                 }
             });
