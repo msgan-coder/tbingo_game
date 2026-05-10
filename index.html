@@ -1,106 +1,91 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>T-Bingo Online</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
-        :root { --primary: #2c3e50; --accent: #f1c40f; --success: #2ecc71; --danger: #e74c3c; }
-        body { font-family: sans-serif; background: #f0f2f5; padding: 10px; display: flex; flex-direction: column; align-items: center; margin: 0; }
-        .recent-calls-container { width: 95%; background: white; padding: 10px; border-radius: 10px; margin-bottom: 15px; text-align: center; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
-        #recent-list { display: flex; justify-content: center; gap: 8px; min-height: 40px; }
-        .recent-num { width: 40px; height: 40px; border-radius: 50%; background: #eee; display: flex; align-items: center; justify-content: center; font-weight: bold; border: 1px solid #ccc; font-size: 0.8rem; }
-        .recent-num.latest { background: var(--accent); transform: scale(1.1); border-color: #d4ac0d; }
-        .bingo-board { display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px; width: 95%; background: white; padding: 10px; border-radius: 10px; }
-        .cell { aspect-ratio: 1; border: 1px solid #ddd; border-radius: 5px; display: flex; align-items: center; justify-content: center; font-weight: bold; cursor: pointer; background: #fff; font-size: 1.1rem; }
-        .cell.marked { background: var(--accent); border-color: #d4ac0d; }
-        .cell.free { background: var(--success); color: white; font-size: 10px; }
-        .win-btn { width: 95%; padding: 15px; margin-top: 20px; background: var(--danger); color: white; border: none; border-radius: 50px; font-weight: bold; font-size: 1.2rem; }
-        #overlay { display: none; position: fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.85); color:white; flex-direction:column; align-items:center; justify-content:center; z-index:2000; }
+        body { font-family: sans-serif; text-align: center; background: #f0f2f5; padding: 15px; }
+        .header-box { background: white; padding: 15px; border-radius: 12px; margin-bottom: 15px; border: 2px solid #2c3e50; }
+        #recent-numbers { font-weight: bold; color: #d35400; font-size: 1.4rem; min-height: 1.5em; }
+        .bingo-board { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; max-width: 380px; margin: auto; }
+        .cell { aspect-ratio: 1; background: white; display: flex; align-items: center; justify-content: center; font-weight: bold; border-radius: 8px; border: 1px solid #ccc; font-size: 1.2rem; }
+        .cell.marked { background: #f1c40f; border-color: #f39c12; }
+        .cell.free { background: #27ae60; color: white; font-size: 0.8rem; }
+        .win-btn { width: 100%; max-width: 380px; padding: 18px; margin-top: 20px; background: #c0392b; color: white; border: none; border-radius: 50px; font-size: 1.6rem; font-weight: bold; }
     </style>
 </head>
 <body>
-    <div id="overlay"><h2>CLAIM SENT</h2><p>Wait for admin verification...</p><button onclick="location.reload()">Back</button></div>
-    <h1>T-BINGO</h1>
-    <div class="recent-calls-container">
-        <strong>Last 5 Numbers</strong>
-        <div id="recent-list" style="margin-top:5px;"></div>
+    <div class="header-box">
+        <div style="font-size: 0.9rem; color: #7f8c8d;">RECENT NUMBERS</div>
+        <div id="recent-numbers">Connecting...</div>
     </div>
+
     <div class="bingo-board" id="board"></div>
     <button class="win-btn" onclick="claimBingo()">BINGO! 🏆</button>
 
     <script>
         const tg = window.Telegram.WebApp;
         tg.expand();
-        // ENSURE THIS URL MATCHES YOUR RENDER APP URL
-        const BASE_URL = "https://tbingo-game-4.onrender.com"; 
+        
+        // CRITICAL: Must be HTTPS
+        const API_URL = "https://tbingo-game-4.onrender.com"; 
 
-        async function fetchLiveNumbers() {
+        async function updateNumbers() {
             try {
-                const res = await fetch(`${BASE_URL}/get_numbers`);
+                const res = await fetch(`${API_URL}/get_numbers`);
                 const data = await res.json();
-                const list = document.getElementById('recent-list');
-                list.innerHTML = '';
-                data.recent.forEach((val, i) => {
-                    const div = document.createElement('div');
-                    div.className = 'recent-num' + (i === 0 ? ' latest' : '');
-                    div.textContent = val; // Now shows "B-12"
-                    list.appendChild(div);
-                });
-            } catch (e) { console.log("Sync error"); }
-        }
-
-        setInterval(fetchLiveNumbers, 4000);
-        fetchLiveNumbers();
-
-        // Board Generation
-        function getRandom(min, max, count) {
-            let arr = [];
-            while(arr.length < count) {
-                let r = Math.floor(Math.random() * (max - min + 1)) + min;
-                if(!arr.includes(r)) arr.push(r);
+                const display = document.getElementById('recent-numbers');
+                display.textContent = data.recent_text || "Waiting...";
+            } catch (e) {
+                document.getElementById('recent-numbers').textContent = "Offline...";
             }
-            return arr;
         }
 
+        // Generate the 5x5 board
         const board = document.getElementById('board');
-        const cols = { 'B': getRandom(1,15,5), 'I': getRandom(16,30,5), 'N': getRandom(31,45,5), 'G': getRandom(46,60,5), 'O': getRandom(61,75,5) };
+        const getNums = (min, max) => {
+            let a = []; while(a.length < 5) {
+                let r = Math.floor(Math.random()*(max-min+1))+min;
+                if(!a.includes(r)) a.push(r);
+            } return a;
+        };
+        const cols = [getNums(1,15), getNums(16,30), getNums(31,45), getNums(46,60), getNums(61,75)];
         
         for(let r=0; r<5; r++) {
-            ['B','I','N','G','O'].forEach((l, i) => {
+            for(let c=0; c<5; c++) {
                 const cell = document.createElement('div');
                 cell.className = 'cell';
-                if(r===2 && i===2) {
-                    cell.textContent = "FREE";
-                    cell.classList.add('free', 'marked');
-                } else {
-                    cell.textContent = cols[l][r];
-                    cell.onclick = () => {
-                        cell.classList.toggle('marked');
-                        tg.HapticFeedback.impactOccurred('medium');
-                    };
+                if(r===2 && c===2) { cell.textContent="FREE"; cell.classList.add('free','marked'); }
+                else {
+                    cell.textContent = cols[c][r];
+                    cell.onclick = () => { cell.classList.toggle('marked'); tg.HapticFeedback.impactOccurred('medium'); };
                 }
                 board.appendChild(cell);
-            });
+            }
         }
 
         async function claimBingo() {
-            const marked = Array.from(document.querySelectorAll('.cell.marked')).map(c => c.textContent);
+            const marked = Array.from(document.querySelectorAll('.cell.marked')).map(el => el.textContent);
             tg.showConfirm("Submit Bingo Claim?", async (ok) => {
                 if(!ok) return;
-                document.getElementById('overlay').style.display = 'flex';
-                await fetch(`${BASE_URL}/claim_bingo`, {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({
-                        user: tg.initDataUnsafe.user?.username || "Unknown",
-                        user_id: tg.initDataUnsafe.user?.id,
-                        numbers: marked
-                    })
-                });
+                try {
+                    await fetch(`${API_URL}/claim_bingo`, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            user: tg.initDataUnsafe.user?.username || "Player",
+                            user_id: tg.initDataUnsafe.user?.id,
+                            numbers: marked
+                        })
+                    });
+                    tg.showAlert("Claim sent! Admin is checking.");
+                } catch (e) { tg.showAlert("Error sending claim."); }
             });
         }
+
+        setInterval(updateNumbers, 4000);
+        updateNumbers();
     </script>
 </body>
 </html>
