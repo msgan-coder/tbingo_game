@@ -29,7 +29,7 @@ logging.basicConfig(level=logging.INFO)
 
 @app.route('/get_numbers')
 def get_numbers():
-    # Pass the session_id to the frontend so it can check if it's still valid
+    # Sending the recent numbers list to the card
     return jsonify({
         "recent": called_numbers[-5:][::-1], 
         "active": game_active,
@@ -57,7 +57,7 @@ def claim_bingo():
         kb = [[InlineKeyboardButton("🏆 CONFIRM WIN", callback_data=f"win_{user_id}_{user_name}"),
                InlineKeyboardButton("❌ REJECT", callback_data=f"lose_{user_id}_{user_name}")]]
         
-        # Notify Admin
+        # Notify Admin - This fixed the "no message for admin" issue
         asyncio.run_coroutine_threadsafe(
             bot_app.bot.send_message(
                 chat_id=ADMIN_ID, 
@@ -119,8 +119,15 @@ async def auto_caller(context: ContextTypes.DEFAULT_TYPE):
     global called_numbers, game_active
     if not game_active or len(called_numbers) >= 75: return
 
-    num = random.randint(1, 75)
-    while num in called_numbers: num = random.randint(1, 75)
+    # Generate only numbers not already in the list
+    available_numbers = [n for n in range(1, 76)]
+    # Filter out numbers already called (extracting the digits from the string "B-5" etc)
+    existing_nums = [int(n.split('-')[1]) for n in called_numbers]
+    remaining = [n for n in available_numbers if n not in existing_nums]
+
+    if not remaining: return
+    
+    num = random.choice(remaining)
     
     # Prefix mapping for clear listing
     if 1 <= num <= 15: letter = "B"
@@ -129,8 +136,11 @@ async def auto_caller(context: ContextTypes.DEFAULT_TYPE):
     elif 46 <= num <= 60: letter = "G"
     else: letter = "O"
 
-    called_numbers.append(f"{letter}-{num}")
-    await context.bot.send_message(chat_id=GROUP_CHAT_ID, text=f"🔔 **{letter}-{num}**")
+    full_call = f"{letter}-{num}"
+    called_numbers.append(full_call)
+    
+    # Send to group chat
+    await context.bot.send_message(chat_id=GROUP_CHAT_ID, text=f"🔔 **{full_call}**")
 
 async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global game_active, called_numbers
@@ -150,6 +160,11 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data[0] == "adm" and data[1] == "resume":
         game_active = True
         await context.bot.send_message(chat_id=GROUP_CHAT_ID, text="▶️ Game Resumed.")
+
+    elif data[0] == "adm" and data[1] == "reset":
+        called_numbers = []
+        game_active = False
+        await context.bot.send_message(chat_id=GROUP_CHAT_ID, text="♻️ Game Reset by Admin.")
 
     elif data[0] == "win":
         winner_name = data[2]
@@ -179,7 +194,7 @@ def main():
     threading.Thread(target=run_flask, daemon=True).start()
     
     application = Application.builder().token(token).build()
-    bot_app = application # Reference for Flask
+    bot_app = application # Reference for Flask to send messages
     
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("play", start_game))
