@@ -52,7 +52,6 @@
                 const response = await fetch(`${BASE_URL}/get_numbers`);
                 const data = await response.json();
                 
-                // Store session ID to prevent old game claims
                 currentSessionId = data.session_id;
 
                 if (data.recent) {
@@ -61,12 +60,11 @@
                     data.recent.forEach((num, i) => {
                         const div = document.createElement('div');
                         div.className = 'recent-num' + (i === 0 ? ' latest' : '');
-                        // If number is "B-5", this displays just "5" to fit the circle
                         div.textContent = num; 
                         list.appendChild(div);
                     });
                 }
-            } catch (e) { console.log("Syncing with server..."); }
+            } catch (e) { console.error("Sync Error"); }
         }
         setInterval(fetchLiveNumbers, 4000);
         fetchLiveNumbers();
@@ -109,24 +107,25 @@
         // 3. Claim Bingo
         async function claimBingo() {
             const marked = Array.from(document.querySelectorAll('.cell.marked')).map(c => c.textContent);
-            if(marked.length < 5) return tg.showAlert("You need at least 5 marked numbers!");
+            if(marked.length < 5) return tg.showAlert("Need 5 numbers!");
 
-            tg.showConfirm("Submit BINGO claim to Admin?", async (ok) => {
+            tg.showConfirm("Submit BINGO claim?", async (ok) => {
                 if(ok) {
                     document.getElementById('waiting-overlay').style.display = 'flex';
                     try {
-                        await fetch(`${BASE_URL}/claim_bingo`, {
+                        const res = await fetch(`${BASE_URL}/claim_bingo`, {
                             method: 'POST',
                             headers: {'Content-Type': 'application/json'},
                             body: JSON.stringify({
                                 user: tg.initDataUnsafe.user?.username || "Player",
                                 user_id: tg.initDataUnsafe.user?.id,
                                 numbers: marked,
-                                session_id: currentSessionId // Vital for verification
+                                session_id: currentSessionId
                             })
                         });
+                        if (!res.ok) throw new Error();
                     } catch (err) {
-                        tg.showAlert("Connection lost. Please check your internet.");
+                        tg.showAlert("Failed to send claim.");
                         document.getElementById('waiting-overlay').style.display = 'none';
                     }
                 }
