@@ -26,6 +26,10 @@ bot_app = None
 
 logging.basicConfig(level=logging.INFO)
 
+@app.route('/')
+def health():
+    return "Bot is Running", 200
+
 @app.route('/get_numbers')
 def get_numbers():
     clean_recent = []
@@ -41,33 +45,33 @@ def get_numbers():
 @app.route('/claim_bingo', methods=['POST'])
 def claim_bingo():
     global game_active, bot_app
-    data = request.json
-    user_name = data.get("user", "Unknown")
-    user_id = data.get("user_id")
-    marked_nums = data.get("numbers", [])
-    
-    # Pause calling while verifying
-    game_active = False 
-    
-    if bot_app:
-        loop = bot_app.loop
-        kb = [[InlineKeyboardButton("🏆 CONFIRM WIN", callback_data=f"win_{user_id}_{user_name}"),
-               InlineKeyboardButton("❌ REJECT", callback_data=f"lose_{user_id}_{user_name}")]]
+    try:
+        data = request.json
+        user_name = data.get("user", "Unknown")
+        user_id = data.get("user_id")
+        marked_nums = data.get("numbers", [])
         
-        # Admin Notification
-        asyncio.run_coroutine_threadsafe(
-            bot_app.bot.send_message(
-                chat_id=ADMIN_ID, 
-                text=f"🧐 **VERIFY CLAIM: @{user_name}**\nNumbers: {marked_nums}",
-                reply_markup=InlineKeyboardMarkup(kb)
-            ), loop
-        )
-        # Group Notification
-        asyncio.run_coroutine_threadsafe(
-            bot_app.bot.send_message(chat_id=GROUP_CHAT_ID, text=f"⚠️ **BINGO CLAIMED by @{user_name}!**\nVerifying..."), loop
-        )
-    
-    return jsonify({"status": "received"})
+        game_active = False 
+        
+        if bot_app:
+            loop = bot_app.loop
+            kb = [[InlineKeyboardButton("🏆 CONFIRM WIN", callback_data=f"win_{user_id}_{user_name}"),
+                   InlineKeyboardButton("❌ REJECT", callback_data=f"lose_{user_id}_{user_name}")]]
+            
+            asyncio.run_coroutine_threadsafe(
+                bot_app.bot.send_message(
+                    chat_id=ADMIN_ID, 
+                    text=f"🧐 **VERIFY CLAIM: @{user_name}**\nNumbers: {marked_nums}",
+                    reply_markup=InlineKeyboardMarkup(kb)
+                ), loop
+            )
+            asyncio.run_coroutine_threadsafe(
+                bot_app.bot.send_message(chat_id=GROUP_CHAT_ID, text=f"⚠️ **BINGO CLAIMED by @{user_name}!**\nVerifying..."), loop
+            )
+        
+        return jsonify({"status": "received"}), 200
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 def run_flask():
     port = int(os.environ.get("PORT", 10000))
