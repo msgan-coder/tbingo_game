@@ -36,11 +36,19 @@
 
         async function fetchUpdates() {
             try {
-                const res = await fetch(`${API_URL}/get_numbers`);
+                // Adding a timestamp ?t= prevents the browser from showing old data
+                const res = await fetch(`${API_URL}/get_numbers?t=${new Date().getTime()}`, {
+                    method: 'GET',
+                    headers: { 'Accept': 'application/json' }
+                });
                 const data = await res.json();
-                document.getElementById('recent-numbers').textContent = data.recent_text;
+                
+                if (data.recent_text) {
+                    document.getElementById('recent-numbers').textContent = data.recent_text;
+                }
             } catch (e) {
-                document.getElementById('recent-numbers').textContent = "Server Offline";
+                console.error("Connection failed");
+                document.getElementById('recent-numbers').textContent = "Connecting...";
             }
         }
 
@@ -97,6 +105,8 @@
                     });
                     if(res.ok) {
                         tg.showAlert("Bingo claim sent! Please wait for Admin.");
+                    } else {
+                        tg.showAlert("Server busy. Please try again.");
                     }
                 } catch (e) {
                     tg.showAlert("Failed to connect to server.");
