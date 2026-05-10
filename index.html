@@ -24,9 +24,10 @@
 <body>
 
     <div id="waiting-overlay">
-        <h2 style="color: var(--accent);">VERIFYING...</h2>
-        <p>Admin is checking your card.</p>
-        <button onclick="window.location.reload()" style="padding:10px; margin-top:10px;">Back to Game</button>
+        <h2 id="status-title" style="color: var(--accent);">VERIFYING...</h2>
+        <p id="status-desc">Admin is checking your card.</p>
+        <button id="retry-btn" onclick="claimBingo()" style="display:none; padding:10px 20px; background:var(--accent); border:none; border-radius:5px; font-weight:bold;">Retry</button>
+        <button onclick="window.location.reload()" style="padding:10px; margin-top:10px; background:none; color:white; border:1px solid white;">Cancel</button>
     </div>
 
     <h1>T-BINGO</h1>
@@ -46,12 +47,10 @@
         const BASE_URL = "https://tbingo-game-4.onrender.com"; 
         let currentSessionId = "";
 
-        // 1. Fetch Numbers
         async function fetchLiveNumbers() {
             try {
                 const response = await fetch(`${BASE_URL}/get_numbers`);
                 const data = await response.json();
-                
                 currentSessionId = data.session_id;
 
                 if (data.recent) {
@@ -64,12 +63,11 @@
                         list.appendChild(div);
                     });
                 }
-            } catch (e) { console.error("Sync Error"); }
+            } catch (e) { console.log("Wake up in progress..."); }
         }
-        setInterval(fetchLiveNumbers, 4000);
+        setInterval(fetchLiveNumbers, 5000);
         fetchLiveNumbers();
 
-        // 2. Generate Board
         function getRandom(min, max, count) {
             let arr = [];
             while(arr.length < count) {
@@ -104,32 +102,39 @@
             });
         }
 
-        // 3. Claim Bingo
         async function claimBingo() {
             const marked = Array.from(document.querySelectorAll('.cell.marked')).map(c => c.textContent);
-            if(marked.length < 5) return tg.showAlert("Need 5 numbers!");
+            if(marked.length < 5) return tg.showAlert("Mark at least 5 numbers!");
 
-            tg.showConfirm("Submit BINGO claim?", async (ok) => {
-                if(ok) {
-                    document.getElementById('waiting-overlay').style.display = 'flex';
-                    try {
-                        const res = await fetch(`${BASE_URL}/claim_bingo`, {
-                            method: 'POST',
-                            headers: {'Content-Type': 'application/json'},
-                            body: JSON.stringify({
-                                user: tg.initDataUnsafe.user?.username || "Player",
-                                user_id: tg.initDataUnsafe.user?.id,
-                                numbers: marked,
-                                session_id: currentSessionId
-                            })
-                        });
-                        if (!res.ok) throw new Error();
-                    } catch (err) {
-                        tg.showAlert("Failed to send claim.");
-                        document.getElementById('waiting-overlay').style.display = 'none';
-                    }
+            document.getElementById('waiting-overlay').style.display = 'flex';
+            document.getElementById('retry-btn').style.display = 'none';
+            document.getElementById('status-title').textContent = "CONNECTING...";
+            document.getElementById('status-desc').textContent = "Waking up server (can take 30s)...";
+
+            try {
+                const response = await fetch(`${BASE_URL}/claim_bingo`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        user: tg.initDataUnsafe.user?.username || "Player",
+                        user_id: tg.initDataUnsafe.user?.id,
+                        numbers: marked,
+                        session_id: currentSessionId
+                    }),
+                    signal: AbortSignal.timeout(40000) // 40 second timeout
+                });
+
+                if(response.ok) {
+                    document.getElementById('status-title').textContent = "SENT!";
+                    document.getElementById('status-desc').textContent = "Admin is now checking your card.";
+                } else {
+                    throw new Error("Server rejected");
                 }
-            });
+            } catch (err) {
+                document.getElementById('status-title').textContent = "TIMEOUT";
+                document.getElementById('status-desc').textContent = "Server is still waking up. Please try again.";
+                document.getElementById('retry-btn').style.display = 'block';
+            }
         }
     </script>
 </body>
