@@ -29,9 +29,14 @@ logging.basicConfig(level=logging.INFO)
 
 @app.route('/get_numbers')
 def get_numbers():
-    # Sending the recent numbers list to the card
+    # We send only the number part (e.g., '5' instead of 'B-5') 
+    # to your HTML so it can display them in the small circles correctly.
+    clean_recent = []
+    for item in called_numbers[-5:][::-1]:
+        clean_recent.append(item.split('-')[1] if '-' in item else item)
+        
     return jsonify({
-        "recent": called_numbers[-5:][::-1], 
+        "recent": clean_recent, 
         "active": game_active,
         "session_id": game_session_id
     })
@@ -44,11 +49,6 @@ def claim_bingo():
     user_id = data.get("user_id")
     marked_nums = data.get("numbers", [])
     
-    # Check session
-    client_session = data.get("session_id")
-    if client_session and client_session != game_session_id:
-        return jsonify({"status": "expired", "message": "This game session has expired."})
-
     game_active = False # Pause calling
     
     # Send verification notification to Admin and Group
@@ -57,7 +57,7 @@ def claim_bingo():
         kb = [[InlineKeyboardButton("🏆 CONFIRM WIN", callback_data=f"win_{user_id}_{user_name}"),
                InlineKeyboardButton("❌ REJECT", callback_data=f"lose_{user_id}_{user_name}")]]
         
-        # Notify Admin - This fixed the "no message for admin" issue
+        # This sends the message to you (Admin)
         asyncio.run_coroutine_threadsafe(
             bot_app.bot.send_message(
                 chat_id=ADMIN_ID, 
@@ -65,12 +65,11 @@ def claim_bingo():
                 reply_markup=InlineKeyboardMarkup(kb)
             ), loop
         )
-        # Notify Group
+        # This sends the message to the Group
         asyncio.run_coroutine_threadsafe(
             bot_app.bot.send_message(chat_id=GROUP_CHAT_ID, text=f"⚠️ **BINGO CLAIMED by @{user_name}!**\nVerifying card..."), loop
         )
     
-    print(f"BINGO CLAIMED BY {user_name}")
     return jsonify({"status": "received"})
 
 def run_flask():
@@ -119,17 +118,11 @@ async def auto_caller(context: ContextTypes.DEFAULT_TYPE):
     global called_numbers, game_active
     if not game_active or len(called_numbers) >= 75: return
 
-    # Generate only numbers not already in the list
-    available_numbers = [n for n in range(1, 76)]
-    # Filter out numbers already called (extracting the digits from the string "B-5" etc)
-    existing_nums = [int(n.split('-')[1]) for n in called_numbers]
-    remaining = [n for n in available_numbers if n not in existing_nums]
-
-    if not remaining: return
+    num = random.randint(1, 75)
+    # Check if number already called
+    while any(str(num) == n.split('-')[1] if '-' in n else n == str(num) for n in called_numbers):
+        num = random.randint(1, 75)
     
-    num = random.choice(remaining)
-    
-    # Prefix mapping for clear listing
     if 1 <= num <= 15: letter = "B"
     elif 16 <= num <= 30: letter = "I"
     elif 31 <= num <= 45: letter = "N"
@@ -138,8 +131,6 @@ async def auto_caller(context: ContextTypes.DEFAULT_TYPE):
 
     full_call = f"{letter}-{num}"
     called_numbers.append(full_call)
-    
-    # Send to group chat
     await context.bot.send_message(chat_id=GROUP_CHAT_ID, text=f"🔔 **{full_call}**")
 
 async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -169,16 +160,11 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data[0] == "win":
         winner_name = data[2]
         await context.bot.send_message(chat_id=GROUP_CHAT_ID, text=f"🎊 **WINNER: @{winner_name}!** 🏆")
-        
         game_active = False
         for job in context.job_queue.get_jobs_by_name("bingo_job"): job.schedule_removal()
         
-        new_round_text = (
-            "🏁 **Game Over!**\n\n"
-            "To play the next round, please pay **10 ETB** and send your screenshot to the bot.\n"
-            "⚠️ *Old play buttons are now expired.*"
-        )
-        await context.bot.send_message(chat_id=GROUP_CHAT_ID, text=new_round_text)
+        prompt = "🏁 **Game Over!**\n\nPay **10 ETB** for next round. Send screenshot to bot.\n⚠️ *Old buttons expired.*"
+        await context.bot.send_message(chat_id=GROUP_CHAT_ID, text=prompt)
         await query.edit_message_text(text=f"✅ Winner confirmed: @{winner_name}")
     
     elif data[0] == "lose":
@@ -194,7 +180,7 @@ def main():
     threading.Thread(target=run_flask, daemon=True).start()
     
     application = Application.builder().token(token).build()
-    bot_app = application # Reference for Flask to send messages
+    bot_app = application 
     
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("play", start_game))
