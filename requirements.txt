@@ -1,5 +1,5 @@
-python-telegram-bot[job-queue]==21.1
-flask==3.0.2
-flask-cors==4.0.0
-gunicorn==21.2.0
-requests==2.31.0
+python-telegram-bot[job-queue]==21.1.1
+flask
+flask-cors
+uvicorn
+gunicorn
