@@ -1,123 +1,78 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>T-Bingo Online</title>
+    <title>Pro Bingo</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
-        :root { --primary: #2c3e50; --accent: #f39c12; --success: #27ae60; --danger: #e74c3c; }
-        body { font-family: sans-serif; background: #f0f3f6; margin: 0; padding: 15px; display: flex; flex-direction: column; align-items: center; }
-        .header { background: white; width: 100%; max-width: 400px; padding: 15px; border-radius: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 20px; text-align: center; }
-        #recent-numbers { color: var(--danger); font-size: 1.5rem; font-weight: bold; margin-top: 10px; min-height: 1.8rem; }
-        .bingo-board { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; width: 100%; max-width: 400px; }
-        .cell { aspect-ratio: 1; background: white; border: 1px solid #ddd; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 1.3rem; cursor: pointer; transition: 0.2s; }
-        .cell.marked { background: var(--accent); color: white; border-color: #d35400; transform: scale(0.95); }
-        .cell.free { background: var(--success); color: white; font-size: 0.8rem; }
-        .win-btn { width: 100%; max-width: 400px; padding: 18px; margin-top: 25px; background: var(--danger); color: white; border: none; border-radius: 50px; font-size: 1.5rem; font-weight: bold; box-shadow: 0 4px 15px rgba(231, 76, 60, 0.4); }
+        body { font-family: 'Segoe UI', sans-serif; background: #1a1a2e; color: white; display: flex; flex-direction: column; align-items: center; padding: 20px; }
+        .timer { font-size: 2rem; color: #f39c12; margin-bottom: 10px; font-weight: bold; }
+        .recent-box { background: #16213e; padding: 15px; border-radius: 15px; width: 100%; max-width: 350px; text-align: center; border-bottom: 4px solid #0f3460; margin-bottom: 20px; }
+        .grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; width: 100%; max-width: 350px; }
+        .cell { aspect-ratio: 1; background: #0f3460; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; font-weight: bold; transition: 0.3s; cursor: pointer; }
+        .cell.marked { background: #e94560; transform: scale(0.9); box-shadow: 0 0 15px #e94560; }
+        .cell.free { background: #27ae60; font-size: 0.7rem; }
+        .claim-btn { margin-top: 30px; padding: 15px 40px; border-radius: 30px; border: none; background: #e94560; color: white; font-size: 1.5rem; font-weight: bold; cursor: pointer; animation: pulse 2s infinite; }
+        @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.05); } 100% { transform: scale(1); } }
     </style>
 </head>
 <body>
-
-    <div class="header">
-        <div style="font-size: 0.9rem; color: #7f8c8d; letter-spacing: 1px;">LAST 5 NUMBERS</div>
-        <div id="recent-numbers">Connecting...</div>
+    <div id="countdown" class="timer"></div>
+    <div class="recent-box">
+        <small>LATEST NUMBERS</small>
+        <div id="numbers" style="font-size: 1.5rem; color: #e94560;">Waiting...</div>
     </div>
-
-    <div class="bingo-board" id="board"></div>
-
-    <button class="win-btn" onclick="claimBingo()">BINGO! 🏆</button>
+    <div class="grid" id="board"></div>
+    <button class="claim-btn" onclick="claim()">BINGO!</button>
 
     <script>
         const tg = window.Telegram.WebApp;
-        tg.expand();
-        
-        const API_URL = "https://huge-shoes-punch.loca.lt"; 
+        const API_URL = "https:// https://huge-shoes-punch.loca.lt"; // Updated every time you run LT
 
-        async function fetchUpdates() {
-            try {
-                // Adding a timestamp ?t= prevents the browser from showing old data
-                const res = await fetch(`${API_URL}/get_numbers?t=${new Date().getTime()}`, {
-                    method: 'GET',
-                    headers: { 'Accept': 'application/json' }
-                });
-                const data = await res.json();
-                
-                if (data.recent_text) {
-                    document.getElementById('recent-numbers').textContent = data.recent_text;
-                }
-            } catch (e) {
-                console.error("Connection failed");
-                document.getElementById('recent-numbers').textContent = "Connecting...";
+        async function update() {
+            const res = await fetch(`${API_URL}/get_numbers`);
+            const data = await res.json();
+            
+            if(data.timer > 0) {
+                document.getElementById('countdown').innerText = `Starts in: ${data.timer}s`;
+            } else {
+                document.getElementById('countdown').innerText = data.active ? "LIVE" : "GAME OVER";
             }
+            document.getElementById('numbers').innerText = data.recent.join("  ");
         }
 
-        function generateBoard() {
+        function createBoard() {
             const board = document.getElementById('board');
-            const getRange = (min, max) => {
-                let nums = [];
-                while(nums.length < 5) {
-                    let r = Math.floor(Math.random() * (max - min + 1)) + min;
-                    if(!nums.includes(r)) nums.push(r);
+            for(let i=0; i<25; i++) {
+                const cell = document.createElement('div');
+                cell.className = 'cell';
+                if(i===12) { cell.innerText="FREE"; cell.classList.add('free','marked'); }
+                else { 
+                    cell.innerText = Math.floor(Math.random()*75)+1;
+                    cell.onclick = () => { cell.classList.toggle('marked'); tg.HapticFeedback.impactOccurred('medium'); };
                 }
-                return nums;
-            };
-
-            const cardData = [getRange(1,15), getRange(16,30), getRange(31,45), getRange(46,60), getRange(61,75)];
-            
-            for(let r=0; r<5; r++) {
-                for(let c=0; c<5; c++) {
-                    const cell = document.createElement('div');
-                    cell.className = 'cell';
-                    if(r === 2 && c === 2) {
-                        cell.textContent = "FREE";
-                        cell.classList.add('free', 'marked');
-                    } else {
-                        cell.textContent = cardData[c][r];
-                        cell.onclick = () => {
-                            cell.classList.toggle('marked');
-                            tg.HapticFeedback.impactOccurred('light');
-                        };
-                    }
-                    board.appendChild(cell);
-                }
+                board.appendChild(cell);
             }
         }
 
-        async function claimBingo() {
-            const marked = Array.from(document.querySelectorAll('.cell.marked')).map(el => el.textContent);
-            
-            tg.showConfirm("Are you sure you have BINGO?", async (ok) => {
-                if(!ok) return;
-                
-                tg.MainButton.show();
-                tg.MainButton.setText("SENDING CLAIM...");
-
-                try {
-                    const res = await fetch(`${API_URL}/claim_bingo`, {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({
-                            user: tg.initDataUnsafe.user?.username || "Player",
-                            user_id: tg.initDataUnsafe.user?.id,
-                            numbers: marked
-                        })
-                    });
-                    if(res.ok) {
-                        tg.showAlert("Bingo claim sent! Please wait for Admin.");
-                    } else {
-                        tg.showAlert("Server busy. Please try again.");
-                    }
-                } catch (e) {
-                    tg.showAlert("Failed to connect to server.");
-                }
-                tg.MainButton.hide();
+        async function claim() {
+            const marked = Array.from(document.querySelectorAll('.cell.marked')).map(c => c.innerText);
+            const res = await fetch(`${API_URL}/claim_bingo`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    user: tg.initDataUnsafe.user?.username,
+                    user_id: tg.initDataUnsafe.user?.id,
+                    numbers: marked
+                })
             });
+            const result = await res.json();
+            tg.showAlert(result.status === "success" ? "Claim sent to Admin!" : result.message);
         }
 
-        generateBoard();
-        setInterval(fetchUpdates, 3000);
-        fetchUpdates();
+        createBoard();
+        setInterval(update, 2000);
     </script>
 </body>
 </html>
