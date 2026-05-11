@@ -1,127 +1,120 @@
-import logging
-import os
-import random
-import asyncio
-import time
+import logging, os, random, threading, asyncio, time, sqlite3
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
-from telegram.ext import (
-    Application, 
-    CommandHandler, 
-    MessageHandler, 
-    filters, 
-    CallbackQueryHandler, 
-    ContextTypes
-)
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler, ContextTypes
 
-# --- CONFIGURATION ---
+# --- CONFIG ---
 ADMIN_ID = 5431140655
 GROUP_CHAT_ID = -1003988432330
-GAME_URL_BASE = "https://msgan-coder.github.io/tbingo_game/"
-TOKEN = os.getenv("BOT_TOKEN")
-# Koyeb provides the URL via an environment variable or you can hardcode it
-KOYEB_URL = os.getenv("KOYEB_PUBLIC_URL") # Example: https://your-app-name.koyeb.app
+GAME_URL_BASE = "https://msgan-coder.github.io/tbingo_game/" 
+TOKEN = "8697522885:AAECWwZLHYhyswGameQESeSNgJW2quJr0es"
 
 app = Flask(__name__)
 CORS(app)
 
-# --- GLOBAL STATE ---
-game_active = False
-called_numbers = []
-game_session_id = str(int(time.time()))
-application = None
+# --- DATABASE SETUP ---
+def init_db():
+    conn = sqlite3.connect('users.db')
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS players 
+                 (user_id INTEGER PRIMARY KEY, username TEXT, wins INTEGER DEFAULT 0)''')
+    conn.commit()
+    conn.close()
 
-logging.basicConfig(level=logging.INFO)
+# --- GLOBAL GAME STATE ---
+state = {
+    "active": False,
+    "numbers": [],
+    "session_id": str(int(time.time())),
+    "start_time": 0
+}
 
-# --- WEBHOOK ROUTE (Telegram hits this) ---
-@app.route(f'/{TOKEN}', methods=['POST'])
-async def telegram_webhook():
-    update = Update.de_json(request.get_json(force=True), application.bot)
-    await application.process_update(update)
-    return "OK", 200
-
-# --- GAME ROUTES ---
-@app.route('/')
-def health():
-    return "Bingo Server Live on Koyeb!", 200
-
+# --- FLASK API ---
 @app.route('/get_numbers')
 def get_numbers():
-    clean_nums = [n.split('-')[1] for n in called_numbers[-5:][::-1]]
     return jsonify({
-        "recent_text": ", ".join(clean_nums) if clean_nums else "Waiting...",
-        "active": game_active,
-        "session_id": game_session_id
+        "recent": state["numbers"][-5:][::-1],
+        "all": state["numbers"],
+        "active": state["active"],
+        "timer": max(0, int(state["start_time"] - time.time()))
     })
 
 @app.route('/claim_bingo', methods=['POST'])
-async def claim_bingo():
+def claim_bingo():
     data = request.json
-    user_name = data.get("user", "Player")
-    user_id = data.get("user_id")
-    marked_nums = data.get("numbers", [])
-
-    if user_id:
-        keyboard = [[
-            InlineKeyboardButton("🏆 CONFIRM WIN", callback_data=f"win|{user_id}|{user_name}"),
-            InlineKeyboardButton("❌ REJECT", callback_data=f"lose|{user_id}|{user_name}")
-        ]]
-        
-        await application.bot.send_message(
-            chat_id=ADMIN_ID,
-            text=f"🚨 **BINGO CLAIMED**\n\nPlayer: @{user_name}\nNumbers: {', '.join(marked_nums)}",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-        await application.bot.send_message(
-            chat_id=GROUP_CHAT_ID,
-            text=f"⚠️ **BINGO!** @{user_name} is claiming a win!"
-        )
-    return jsonify({"status": "received"}), 200
-
-# --- BOT LOGIC (Reused from your script) ---
-async def start_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global game_active, called_numbers, game_session_id
-    if update.effective_user.id != ADMIN_ID: return
-    game_active = True
-    called_numbers = []
-    game_session_id = str(int(time.time()))
+    uid, name, marked = data.get("user_id"), data.get("user"), data.get("numbers", [])
     
-    # Start auto-caller job
-    context.job_queue.run_repeating(auto_caller, interval=12, first=1, name="bingo_job")
-    await update.message.reply_text("🚀 **GAME STARTED!**")
+    # ANTI-CHEAT: Check if marked numbers were actually called
+    fake_nums = [n for n in marked if n not in [num.split('-')[1] for num in state["numbers"]] and n != "FREE"]
+    
+    if fake_nums:
+        # AUTO-KICK LOGIC (Notification to Admin)
+        msg = f"🚫 **FAKE CLAIM DETECTED**\nUser: @{name}\nMarked invalid: {fake_nums}\nAction: Recommended Kick."
+        send_to_telegram(ADMIN_ID, msg)
+        return jsonify({"status": "rejected", "message": "Anti-cheat triggered!"}), 403
+
+    # If valid, alert admin
+    kb = [[InlineKeyboardButton("✅ CONFIRM WIN", callback_data=f"win|{uid}|{name}")]]
+    send_to_telegram(ADMIN_ID, f"🏆 **VALID BINGO!**\nPlayer: @{name}\nVerify quickly!", kb)
+    return jsonify({"status": "success"})
+
+def send_to_telegram(chat_id, text, reply_markup=None):
+    asyncio.run_coroutine_threadsafe(bot_app.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup), bot_app.loop)
+
+# --- BOT LOGIC ---
+async def start_game_flow(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID: return
+    state["start_time"] = time.time() + 30 # 30 second countdown
+    state["numbers"] = []
+    await context.bot.send_message(GROUP_CHAT_ID, "🕒 **BINGO STARTING IN 30 SECONDS!**\nGet your cards ready!")
+    context.job_queue.run_once(begin_calling, 30)
+
+async def begin_calling(context: ContextTypes.DEFAULT_TYPE):
+    state["active"] = True
+    context.job_queue.run_repeating(auto_caller, interval=10, name="bingo_job")
+    await context.bot.send_message(GROUP_CHAT_ID, "🔔 **GAME ON! First number coming...**")
 
 async def auto_caller(context: ContextTypes.DEFAULT_TYPE):
-    global called_numbers, game_active
-    if not game_active or len(called_numbers) >= 75: return
-    num = random.randint(1, 75)
-    while any(str(num) == n.split('-')[1] for n in called_numbers):
-        num = random.randint(1, 75)
-    letter = "B" if num <= 15 else "I" if num <= 30 else "N" if num <= 45 else "G" if num <= 60 else "O"
-    full_call = f"{letter}-{num}"
-    called_numbers.append(full_call)
-    await context.bot.send_message(chat_id=GROUP_CHAT_ID, text=f"🔔 {full_call}")
+    if not state["active"] or len(state["numbers"]) >= 75: return
+    n = random.randint(1, 75)
+    while any(str(n) == x.split('-')[1] for x in state["numbers"]): n = random.randint(1, 75)
+    l = "B" if n<=15 else "I" if n<=30 else "N" if n<=45 else "G" if n<=60 else "O"
+    state["numbers"].append(f"{l}-{n}")
+    await context.bot.send_message(GROUP_CHAT_ID, f"🎯 **{l}-{n}**")
 
-# --- INITIALIZATION ---
-async def setup_bot():
-    global application
-    application = Application.builder().token(TOKEN).build()
-    
-    # Handlers
-    application.add_handler(CommandHandler("play", start_game))
-    application.add_handler(CallbackQueryHandler(admin_callback)) # (Same as before)
-    
-    await application.initialize()
-    await application.start()
-    
-    # Tell Telegram where to send updates
-    await application.bot.set_webhook(url=f"{KOYEB_URL}/{TOKEN}")
-    return application
+async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    conn = sqlite3.connect('users.db')
+    users = conn.execute("SELECT username, wins FROM players ORDER BY wins DESC LIMIT 10").fetchall()
+    conn.close()
+    text = "📊 **TOP PLAYERS**\n" + "\n".join([f"{i+1}. {u[0]} - {u[1]} wins" for i, u in enumerate(users)])
+    await update.message.reply_text(text)
 
-# Run everything
-if __name__ == "__main__":
-    # Note: Use an ASGI server like Uvicorn for production webhooks
-    import uvicorn
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(setup_bot())
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    data = query.data.split('|')
+    if data[0] == "win":
+        uid, name = data[1], data[2]
+        state["active"] = False
+        for job in context.job_queue.get_jobs_by_name("bingo_job"): job.schedule_removal()
+        
+        conn = sqlite3.connect('users.db')
+        conn.execute("INSERT OR IGNORE INTO players (user_id, username) VALUES (?,?)", (uid, name))
+        conn.execute("UPDATE players SET wins = wins + 1 WHERE user_id = ?", (uid,))
+        conn.commit()
+        conn.close()
+        
+        await context.bot.send_message(GROUP_CHAT_ID, f"🎊 **CONGRATULATIONS @{name}!**\nYou won the prize! 💰")
+        await query.edit_message_text("✅ Win recorded in Database.")
+
+def main():
+    global bot_app
+    init_db()
+    threading.Thread(target=lambda: app.run(host="0.0.0.0", port=5000), daemon=True).start()
+    bot_app = Application.builder().token(TOKEN).build()
+    bot_app.add_handler(CommandHandler("play", start_game_flow))
+    bot_app.add_handler(CommandHandler("top", leaderboard))
+    bot_app.add_handler(CallbackQueryHandler(admin_callback))
+    bot_app.run_polling()
+
+if __name__ == "__main__": main()
