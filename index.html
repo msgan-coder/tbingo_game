@@ -8,21 +8,20 @@
     <style>
         body { font-family: 'Segoe UI', sans-serif; background: #1a1a2e; color: white; display: flex; flex-direction: column; align-items: center; padding-top: 120px; margin: 0; }
         .header { position: fixed; top: 0; width: 100%; background: #16213e; padding: 15px 0; text-align: center; border-bottom: 4px solid #e94560; z-index: 1000; }
-        .numbers-display { font-size: 2.2rem; color: #e94560; font-weight: 900; }
+        .numbers-display { font-size: 2.2rem; color: #e94560; font-weight: 900; min-height: 50px; }
         .grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; width: 95%; max-width: 360px; }
-        .cell { aspect-ratio: 1; background: #0f3460; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 1.3rem; font-weight: bold; cursor: pointer; }
-        .cell.marked { background: #e94560; }
+        .cell { aspect-ratio: 1; background: #0f3460; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 1.3rem; font-weight: bold; cursor: pointer; border: 2px solid #16213e; }
+        .cell.marked { background: #e94560; transform: scale(0.95); }
         .cell.free { background: #27ae60; font-size: 0.7rem; }
         .claim-btn { margin-top: 25px; padding: 18px 80px; border-radius: 50px; border: none; background: #e94560; color: white; font-size: 1.8rem; font-weight: bold; cursor: pointer; }
-        .claim-btn:disabled { background: #555; cursor: not-allowed; animation: none; }
+        .claim-btn:disabled { background: #555; cursor: not-allowed; }
     </style>
 </head>
 <body>
     <div class="header">
         <div id="numbers" class="numbers-display">READY</div>
-        <div id="status" style="color: #f39c12;">Checking Session...</div>
+        <div id="status" style="color: #f39c12; font-size: 0.9rem;">Checking Session...</div>
     </div>
-
     <div class="grid" id="board"></div>
     <button id="bingo-btn" class="claim-btn" onclick="claim()">BINGO!</button>
 
@@ -36,21 +35,18 @@
             try {
                 const res = await fetch(`${API_URL}/get_numbers`, { headers: {"ngrok-skip-browser-warning": "true"} });
                 const data = await res.json();
-                
-                // Expiry Check: If session changed or expired, lock the button
                 if (data.session_id !== mySession || data.session_id === "EXPIRED") {
                     document.getElementById('bingo-btn').disabled = true;
                     document.getElementById('status').innerText = "❌ SESSION EXPIRED";
                     document.getElementById('numbers').innerText = "ENDED";
                     return;
                 }
-
-                document.getElementById('numbers').innerText = data.recent.length > 0 ? data.recent.join(" ") : "WAITING";
+                document.getElementById('numbers').innerText = data.recent.length > 0 ? data.recent.join(" ") : "- - -";
                 document.getElementById('status').innerText = data.active ? "● LIVE" : "READY";
             } catch (e) { }
         }
 
-        function createBoard() {
+        function createUniqueBoard() {
             const board = document.getElementById('board');
             const cols = {
                 B: shuffle(Array.from({length: 15}, (_, i) => i + 1)).slice(0, 5),
@@ -59,14 +55,12 @@
                 G: shuffle(Array.from({length: 15}, (_, i) => i + 46)).slice(0, 5),
                 O: shuffle(Array.from({length: 15}, (_, i) => i + 61)).slice(0, 5)
             };
-
             for(let r=0; r<5; r++) {
                 ['B','I','N','G','O'].forEach(l => {
                     const cell = document.createElement('div');
                     cell.className = 'cell';
                     if(l === 'N' && r === 2) {
-                        cell.innerText = "FREE";
-                        cell.classList.add('free', 'marked');
+                        cell.innerText = "FREE"; cell.classList.add('free', 'marked');
                     } else {
                         cell.innerText = cols[l][r];
                         cell.onclick = () => { cell.classList.toggle('marked'); tg.HapticFeedback.impactOccurred('medium'); };
@@ -83,21 +77,13 @@
             const res = await fetch(`${API_URL}/claim_bingo`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ 
-                    user: tg.initDataUnsafe.user?.username, 
-                    user_id: tg.initDataUnsafe.user?.id, 
-                    numbers: marked 
-                })
+                body: JSON.stringify({ user: tg.initDataUnsafe.user?.username, user_id: tg.initDataUnsafe.user?.id, numbers: marked })
             });
             const result = await res.json();
-            if (res.status === 403) {
-                tg.showAlert("🚫 " + result.message);
-            } else {
-                tg.showAlert(result.status === "success" ? "Claim sent!" : result.message);
-            }
+            tg.showAlert(result.status === "success" ? "Claim sent!" : result.message);
         }
 
-        createBoard();
+        createUniqueBoard();
         setInterval(update, 2000);
         tg.expand();
     </script>
