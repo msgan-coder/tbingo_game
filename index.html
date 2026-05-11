@@ -6,73 +6,108 @@
     <title>Pro Bingo</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
-        body { font-family: 'Segoe UI', sans-serif; background: #1a1a2e; color: white; display: flex; flex-direction: column; align-items: center; padding: 20px; }
-        .timer { font-size: 2rem; color: #f39c12; margin-bottom: 10px; font-weight: bold; }
-        .recent-box { background: #16213e; padding: 15px; border-radius: 15px; width: 100%; max-width: 350px; text-align: center; border-bottom: 4px solid #0f3460; margin-bottom: 20px; }
-        .grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; width: 100%; max-width: 350px; }
-        .cell { aspect-ratio: 1; background: #0f3460; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; font-weight: bold; transition: 0.3s; cursor: pointer; }
-        .cell.marked { background: #e94560; transform: scale(0.9); box-shadow: 0 0 15px #e94560; }
+        body { font-family: 'Segoe UI', sans-serif; background: #1a1a2e; color: white; display: flex; flex-direction: column; align-items: center; padding-top: 110px; margin: 0; overflow-x: hidden; }
+        
+        .header { position: fixed; top: 0; width: 100%; background: #16213e; padding: 15px 0; text-align: center; border-bottom: 3px solid #e94560; z-index: 1000; }
+        .timer { font-size: 1.1rem; color: #f39c12; font-weight: bold; margin-bottom: 5px; }
+        .numbers-display { font-size: 1.8rem; color: #e94560; font-weight: bold; min-height: 40px; }
+        
+        .bingo-labels { display: grid; grid-template-columns: repeat(5, 1fr); width: 100%; max-width: 350px; text-align: center; margin-top: 10px; }
+        .letter { font-size: 1.8rem; font-weight: 900; color: #f39c12; }
+
+        .grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; width: 100%; max-width: 350px; padding: 15px; background: #1a1a2e; }
+        .cell { aspect-ratio: 1; background: #0f3460; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; font-weight: bold; cursor: pointer; border: 1px solid #16213e; transition: background 0.2s; }
+        .cell.marked { background: #e94560; transform: scale(0.95); box-shadow: 0 0 10px rgba(233, 69, 96, 0.5); }
         .cell.free { background: #27ae60; font-size: 0.7rem; }
-        .claim-btn { margin-top: 30px; padding: 15px 40px; border-radius: 30px; border: none; background: #e94560; color: white; font-size: 1.5rem; font-weight: bold; cursor: pointer; animation: pulse 2s infinite; }
-        @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.05); } 100% { transform: scale(1); } }
+        
+        .claim-btn { margin: 30px 0; padding: 15px 70px; border-radius: 40px; border: none; background: #e94560; color: white; font-size: 1.7rem; font-weight: bold; cursor: pointer; box-shadow: 0 5px 20px rgba(233, 69, 96, 0.4); }
     </style>
 </head>
 <body>
-    <div id="countdown" class="timer"></div>
-    <div class="recent-box">
-        <small>LATEST NUMBERS</small>
-        <div id="numbers" style="font-size: 1.5rem; color: #e94560;">Waiting...</div>
+    <div class="header">
+        <div id="countdown" class="timer">Connecting...</div>
+        <div id="numbers" class="numbers-display">Waiting</div>
     </div>
+
+    <div class="bingo-labels">
+        <div class="letter">B</div><div class="letter">I</div><div class="letter">N</div><div class="letter">G</div><div class="letter">O</div>
+    </div>
+    
     <div class="grid" id="board"></div>
     <button class="claim-btn" onclick="claim()">BINGO!</button>
 
     <script>
         const tg = window.Telegram.WebApp;
-        const API_URL = "https://uphold-islamist-retail.ngrok-free.dev"; // Updated every time you run LT
+        const API_URL = "https://uphold-islamist-retail.ngrok-free.dev"; 
 
         async function update() {
-            const res = await fetch(`${API_URL}/get_numbers`);
-            const data = await res.json();
-            
-            if(data.timer > 0) {
-                document.getElementById('countdown').innerText = `Starts in: ${data.timer}s`;
-            } else {
-                document.getElementById('countdown').innerText = data.active ? "LIVE" : "GAME OVER";
-            }
-            document.getElementById('numbers').innerText = data.recent.join("  ");
+            try {
+                const res = await fetch(`${API_URL}/get_numbers`, { headers: {"ngrok-skip-browser-warning": "true"} });
+                const data = await res.json();
+                
+                if(data.timer > 0) {
+                    document.getElementById('countdown').innerText = `STARTS IN: ${data.timer}s`;
+                } else if (data.paused) {
+                    document.getElementById('countdown').innerText = "⏸ GAME PAUSED";
+                } else {
+                    document.getElementById('countdown').innerText = data.active ? "● LIVE SESSION" : "WAITING FOR START";
+                }
+                document.getElementById('numbers').innerText = data.recent.length > 0 ? data.recent.join("  ") : "- - -";
+            } catch (e) { document.getElementById('numbers').innerText = "Offline"; }
         }
 
         function createBoard() {
             const board = document.getElementById('board');
-            for(let i=0; i<25; i++) {
-                const cell = document.createElement('div');
-                cell.className = 'cell';
-                if(i===12) { cell.innerText="FREE"; cell.classList.add('free','marked'); }
-                else { 
-                    cell.innerText = Math.floor(Math.random()*75)+1;
-                    cell.onclick = () => { cell.classList.toggle('marked'); tg.HapticFeedback.impactOccurred('medium'); };
-                }
-                board.appendChild(cell);
+            // Column-specific ranges for B-I-N-G-O
+            const cols = {
+                B: shuffle(Array.from({length: 15}, (_, i) => i + 1)).slice(0, 5),
+                I: shuffle(Array.from({length: 15}, (_, i) => i + 16)).slice(0, 5),
+                N: shuffle(Array.from({length: 15}, (_, i) => i + 31)).slice(0, 5),
+                G: shuffle(Array.from({length: 15}, (_, i) => i + 46)).slice(0, 5),
+                O: shuffle(Array.from({length: 15}, (_, i) => i + 61)).slice(0, 5)
+            };
+
+            for(let r=0; r<5; r++) {
+                ['B','I','N','G','O'].forEach(l => {
+                    const cell = document.createElement('div');
+                    cell.className = 'cell';
+                    if(l === 'N' && r === 2) {
+                        cell.innerText = "FREE";
+                        cell.classList.add('free', 'marked');
+                    } else {
+                        cell.innerText = cols[l][r];
+                        cell.onclick = () => { 
+                            cell.classList.toggle('marked'); 
+                            tg.HapticFeedback.impactOccurred('light'); 
+                        };
+                    }
+                    board.appendChild(cell);
+                });
             }
         }
 
+        function shuffle(a) { return a.sort(() => Math.random() - 0.5); }
+
         async function claim() {
             const marked = Array.from(document.querySelectorAll('.cell.marked')).map(c => c.innerText);
-            const res = await fetch(`${API_URL}/claim_bingo`, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    user: tg.initDataUnsafe.user?.username,
-                    user_id: tg.initDataUnsafe.user?.id,
-                    numbers: marked
-                })
-            });
-            const result = await res.json();
-            tg.showAlert(result.status === "success" ? "Claim sent to Admin!" : result.message);
+            try {
+                const res = await fetch(`${API_URL}/claim_bingo`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ 
+                        user: tg.initDataUnsafe.user?.username || "Guest", 
+                        user_id: tg.initDataUnsafe.user?.id, 
+                        numbers: marked 
+                    })
+                });
+                const result = await res.json();
+                tg.showAlert(result.status === "success" ? "Bingo claim sent! Check Telegram group." : result.message);
+            } catch (e) { tg.showAlert("Connection failed."); }
         }
 
         createBoard();
         setInterval(update, 2000);
+        tg.expand();
     </script>
 </body>
 </html>
