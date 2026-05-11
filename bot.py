@@ -37,7 +37,8 @@ def get_numbers():
         "recent": state["numbers"][-5:][::-1],
         "all": state["numbers"],
         "active": state["active"],
-        "timer": max(0, int(state["start_time"] - time.time()))
+        "timer": max(0, int(state["start_time"] - time.time())),
+        "session_id": state["session_id"]
     })
 
 @app.route('/claim_bingo', methods=['POST'])
@@ -45,34 +46,62 @@ def claim_bingo():
     data = request.json
     uid, name, marked = data.get("user_id"), data.get("user"), data.get("numbers", [])
     
-    # ANTI-CHEAT: Check if marked numbers were actually called
-    fake_nums = [n for n in marked if n not in [num.split('-')[1] for num in state["numbers"]] and n != "FREE"]
+    # ANTI-CHEAT: Verify if marked numbers were actually called
+    called_raw = [n.split('-')[1] for n in state["numbers"]]
+    fake_nums = [n for n in marked if n not in called_raw and n != "FREE"]
     
     if fake_nums:
-        # AUTO-KICK LOGIC (Notification to Admin)
-        msg = f"🚫 **FAKE CLAIM DETECTED**\nUser: @{name}\nMarked invalid: {fake_nums}\nAction: Recommended Kick."
-        send_to_telegram(ADMIN_ID, msg)
-        return jsonify({"status": "rejected", "message": "Anti-cheat triggered!"}), 403
+        msg = f"🚫 **FAKE CLAIM DETECTED**\nUser: @{name}\nInvalid numbers: {fake_nums}\nAction: Automatic rejection."
+        # Use job_queue to send message from Flask thread to Telegram
+        bot_app.job_queue.run_once(lambda ctx: ctx.bot.send_message(chat_id=ADMIN_ID, text=msg), 0)
+        return jsonify({"status": "rejected", "message": "Anti-cheat: Numbers not called!"}), 403
 
-    # If valid, alert admin
-    kb = [[InlineKeyboardButton("✅ CONFIRM WIN", callback_data=f"win|{uid}|{name}")]]
-    send_to_telegram(ADMIN_ID, f"🏆 **VALID BINGO!**\nPlayer: @{name}\nVerify quickly!", kb)
+    # If valid, alert admin for manual confirmation
+    kb = [[InlineKeyboardButton("🏆 CONFIRM WIN", callback_data=f"win|{uid}|{name}")]]
+    bot_app.job_queue.run_once(lambda ctx: ctx.bot.send_message(
+        chat_id=ADMIN_ID, 
+        text=f"🏆 **VALID BINGO CLAIM**\nPlayer: @{name}\nVerify quickly!", 
+        reply_markup=InlineKeyboardMarkup(kb)
+    ), 0)
+    
     return jsonify({"status": "success"})
 
-def send_to_telegram(chat_id, text, reply_markup=None):
-    asyncio.run_coroutine_threadsafe(bot_app.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup), bot_app.loop)
+# --- BOT HANDLERS ---
 
-# --- BOT LOGIC ---
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("👋 Welcome to T-Bingo!\n\nPlease send your payment screenshot (10 ETB) to join the game.")
+
+async def handle_payment_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if not update.message.photo: return
+    
+    photo_id = update.message.photo[-1].file_id
+    keyboard = [[
+        InlineKeyboardButton("✅ APPROVE", callback_data=f"pay|app|{user.id}|{user.username or 'player'}"),
+        InlineKeyboardButton("❌ REJECT", callback_data=f"pay|rej|{user.id}|{user.username or 'player'}")
+    ]]
+
+    await context.bot.send_photo(
+        chat_id=ADMIN_ID, 
+        photo=photo_id, 
+        caption=f"💰 **New Payment Screenshot**\nFrom: @{user.username} ({user.id})", 
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+    await update.message.reply_text("✅ Verification sent to Admin. Please wait...")
+
 async def start_game_flow(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID: return
-    state["start_time"] = time.time() + 30 # 30 second countdown
+    state["active"] = False
     state["numbers"] = []
+    state["session_id"] = str(int(time.time()))
+    state["start_time"] = time.time() + 30 
+    
     await context.bot.send_message(GROUP_CHAT_ID, "🕒 **BINGO STARTING IN 30 SECONDS!**\nGet your cards ready!")
     context.job_queue.run_once(begin_calling, 30)
 
 async def begin_calling(context: ContextTypes.DEFAULT_TYPE):
     state["active"] = True
-    context.job_queue.run_repeating(auto_caller, interval=10, name="bingo_job")
+    context.job_queue.run_repeating(auto_caller, interval=12, first=1, name="bingo_job")
     await context.bot.send_message(GROUP_CHAT_ID, "🔔 **GAME ON! First number coming...**")
 
 async def auto_caller(context: ContextTypes.DEFAULT_TYPE):
@@ -92,8 +121,26 @@ async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
+    await query.answer()
     data = query.data.split('|')
-    if data[0] == "win":
+
+    # Handle Payment Approval
+    if data[0] == "pay":
+        action, uid, name = data[1], int(data[2]), data[3]
+        if action == "app":
+            url = f"{GAME_URL_BASE}?s={state['session_id']}"
+            await context.bot.send_message(
+                chat_id=uid, 
+                text="✅ **Payment Approved!**\nHere is your game link:", 
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🎮 Play Bingo", web_app=WebAppInfo(url=url))]])
+            )
+            await query.edit_message_caption(caption=f"✅ Approved: @{name}")
+        else:
+            await context.bot.send_message(chat_id=uid, text="❌ Payment Rejected. Please contact Admin.")
+            await query.edit_message_caption(caption=f"❌ Rejected: @{name}")
+
+    # Handle Win Confirmation
+    elif data[0] == "win":
         uid, name = data[1], data[2]
         state["active"] = False
         for job in context.job_queue.get_jobs_by_name("bingo_job"): job.schedule_removal()
@@ -105,16 +152,28 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn.close()
         
         await context.bot.send_message(GROUP_CHAT_ID, f"🎊 **CONGRATULATIONS @{name}!**\nYou won the prize! 💰")
-        await query.edit_message_text("✅ Win recorded in Database.")
+        await query.edit_message_text(text=f"✅ Win recorded for @{name}")
 
+# --- MAIN ---
 def main():
     global bot_app
     init_db()
-    threading.Thread(target=lambda: app.run(host="0.0.0.0", port=5000), daemon=True).start()
+    
+    # Start Flask in a background thread
+    threading.Thread(target=lambda: app.run(host="0.0.0.0", port=5000, use_reloader=False), daemon=True).start()
+    
+    # Build the Application
     bot_app = Application.builder().token(TOKEN).build()
+    
+    # Handlers
+    bot_app.add_handler(CommandHandler("start", start_command))
     bot_app.add_handler(CommandHandler("play", start_game_flow))
     bot_app.add_handler(CommandHandler("top", leaderboard))
+    bot_app.add_handler(MessageHandler(filters.PHOTO, handle_payment_screenshot))
     bot_app.add_handler(CallbackQueryHandler(admin_callback))
+    
+    print("🤖 Professional Bingo Bot is starting...")
     bot_app.run_polling()
 
-if __name__ == "__main__": main()
+if __name__ == "__main__":
+    main()
