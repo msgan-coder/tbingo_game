@@ -6,22 +6,22 @@
     <title>T-Bingo Live</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
-        body { font-family: 'Segoe UI', sans-serif; background: #1a1a2e; color: white; display: flex; flex-direction: column; align-items: center; padding-top: 130px; margin: 0; overflow-x: hidden; }
-        .header { position: fixed; top: 0; width: 100%; background: #16213e; padding: 15px 0; text-align: center; border-bottom: 4px solid #e94560; z-index: 1000; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
-        .numbers-display { font-size: 2.4rem; color: #e94560; font-weight: 900; letter-spacing: 2px; }
-        .grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; width: 92%; max-width: 380px; margin-bottom: 20px; }
-        .cell { aspect-ratio: 1; background: #0f3460; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 1.4rem; font-weight: bold; cursor: pointer; border: 2px solid #16213e; transition: 0.2s; }
-        .cell.marked { background: #e94560; border-color: #fff; transform: scale(0.95); box-shadow: inset 0 0 10px rgba(0,0,0,0.5); }
-        .cell.free { background: #27ae60; font-size: 0.8rem; }
-        .claim-btn { width: 85%; padding: 15px; border-radius: 50px; border: none; background: #e94560; color: white; font-size: 1.8rem; font-weight: bold; cursor: pointer; margin-bottom: 30px; box-shadow: 0 5px 15px rgba(233, 69, 96, 0.4); }
-        .claim-btn:disabled { background: #444; box-shadow: none; opacity: 0.6; }
-        #status-bar { font-size: 0.8rem; color: #aaa; margin-bottom: 5px; }
+        body { font-family: 'Segoe UI', sans-serif; background: #1a1a2e; color: white; display: flex; flex-direction: column; align-items: center; padding-top: 140px; margin: 0; }
+        .header { position: fixed; top: 0; width: 100%; background: #16213e; padding: 10px 0; text-align: center; border-bottom: 4px solid #e94560; z-index: 1000; }
+        .recent-container { display: flex; justify-content: center; gap: 10px; margin-top: 10px; height: 50px; }
+        .num-ball { width: 45px; height: 45px; background: #0f3460; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 0.9rem; border: 2px solid #e94560; animation: pop 0.4s ease-out; }
+        .num-ball.latest { background: #e94560; color: white; transform: scale(1.2); border-color: #fff; box-shadow: 0 0 15px #e94560; }
+        @keyframes pop { 0% { transform: scale(0); } 100% { transform: scale(1); } }
+        .grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; width: 92%; max-width: 380px; }
+        .cell { aspect-ratio: 1; background: #0f3460; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 1.4rem; font-weight: bold; border: 2px solid #16213e; }
+        .cell.marked { background: #27ae60; border-color: #fff; }
+        .claim-btn { width: 85%; padding: 15px; border-radius: 50px; background: #e94560; color: white; font-size: 1.8rem; font-weight: bold; margin-top: 20px; }
     </style>
 </head>
 <body>
     <div class="header">
         <div id="status-bar">CONNECTING...</div>
-        <div id="numbers" class="numbers-display">- - -</div>
+        <div class="recent-container" id="recent-nums"></div>
     </div>
 
     <div class="grid" id="board"></div>
@@ -30,44 +30,51 @@
     <script>
         const tg = window.Telegram.WebApp;
         const API_URL = "https://uphold-islamist-retail.ngrok-free.dev"; 
-        const urlParams = new URLSearchParams(window.location.search);
-        const mySession = urlParams.get('s');
+        const params = new URLSearchParams(window.location.search);
+        const mySession = params.get('s');
+        const myUid = params.get('u');
+        let knownNumbers = [];
 
         async function update() {
             try {
                 const res = await fetch(`${API_URL}/get_numbers`, { headers: {"ngrok-skip-browser-warning": "true"} });
                 const data = await res.json();
                 
-                // Session Check
-                if (data.session_id !== mySession || data.session_id === "EXPIRED") {
+                if (data.session_id !== mySession) {
                     document.getElementById('status-bar').innerText = "❌ SESSION EXPIRED";
                     document.getElementById('bingo-btn').disabled = true;
                     return;
                 }
 
-                document.getElementById('numbers').innerText = data.recent.length > 0 ? data.recent.join(" ") : "WAITING";
-                document.getElementById('status-bar').innerText = data.active ? "● LIVE DRAWING" : "⏳ PREPARING...";
-            } catch (e) {
-                document.getElementById('status-bar').innerText = "OFFLINE";
-            }
+                document.getElementById('status-bar').innerText = data.active ? "● LIVE" : "⏳ WAITING";
+                
+                // Show 5 recent numbers with unique color for the newest
+                const container = document.getElementById('recent-nums');
+                if (JSON.stringify(data.recent) !== JSON.stringify(knownNumbers)) {
+                    knownNumbers = data.recent;
+                    container.innerHTML = "";
+                    data.recent.forEach((n, i) => {
+                        const ball = document.createElement('div');
+                        ball.className = i === 0 ? "num-ball latest" : "num-ball";
+                        ball.innerText = n;
+                        container.appendChild(ball);
+                    });
+                }
+            } catch (e) { document.getElementById('status-bar').innerText = "OFFLINE"; }
         }
 
-        function createBoard() {
+        async function loadBoard() {
+            const res = await fetch(`${API_URL}/get_card?user_id=${myUid}`, { headers: {"ngrok-skip-browser-warning": "true"} });
+            const data = await res.json();
             const board = document.getElementById('board');
-            const ranges = [[1,15],[16,30],[31,45],[46,60],[61,75]];
-            const cols = ranges.map(r => {
-                let nums = Array.from({length: r[1]-r[0]+1}, (_, i) => i + r[0]);
-                return nums.sort(() => Math.random() - 0.5).slice(0, 5);
-            });
-
+            // Transpose columns back to rows for display
             for(let r=0; r<5; r++) {
                 for(let c=0; c<5; c++) {
                     const cell = document.createElement('div');
                     cell.className = 'cell';
-                    if(c === 2 && r === 2) {
-                        cell.innerText = "FREE"; cell.classList.add('free', 'marked');
-                    } else {
-                        cell.innerText = cols[c][r];
+                    if(c===2 && r===2) { cell.innerText="FREE"; cell.classList.add('marked'); }
+                    else {
+                        cell.innerText = data.card[c][r];
                         cell.onclick = () => { cell.classList.toggle('marked'); tg.HapticFeedback.impactOccurred('light'); };
                     }
                     board.appendChild(cell);
@@ -77,17 +84,16 @@
 
         async function claim() {
             const marked = Array.from(document.querySelectorAll('.cell.marked')).map(c => c.innerText);
-            tg.HapticFeedback.notificationOccurred('success');
             const res = await fetch(`${API_URL}/claim_bingo`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ user: tg.initDataUnsafe.user?.username || "Unknown", user_id: tg.initDataUnsafe.user?.id, numbers: marked })
+                body: JSON.stringify({ user: tg.initDataUnsafe.user?.username || "Player", user_id: myUid, numbers: marked })
             });
             const result = await res.json();
-            tg.showAlert(result.status === "success" ? "🏆 Claim Sent! Please wait for Admin." : "❌ " + result.message);
+            tg.showAlert(result.status === "success" ? "🏆 Claim Sent!" : "❌ " + result.message);
         }
 
-        createBoard();
+        loadBoard();
         setInterval(update, 2000);
         tg.expand();
     </script>
