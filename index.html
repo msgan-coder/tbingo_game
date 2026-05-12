@@ -12,10 +12,15 @@
         .num-ball { width: 45px; height: 45px; background: #0f3460; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 0.9rem; border: 2px solid #e94560; animation: pop 0.4s ease-out; }
         .num-ball.latest { background: #e94560; color: white; transform: scale(1.2); border-color: #fff; box-shadow: 0 0 15px #e94560; }
         @keyframes pop { 0% { transform: scale(0); } 100% { transform: scale(1); } }
+        
+        /* --- BINGO LETTERS STYLE --- */
+        .bingo-header { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; width: 92%; max-width: 380px; margin-bottom: 5px; }
+        .letter { text-align: center; font-size: 1.8rem; font-weight: 900; color: #e94560; text-shadow: 0 0 10px rgba(233, 69, 96, 0.5); }
+        
         .grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; width: 92%; max-width: 380px; }
         .cell { aspect-ratio: 1; background: #0f3460; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 1.4rem; font-weight: bold; border: 2px solid #16213e; }
         .cell.marked { background: #27ae60; border-color: #fff; }
-        .claim-btn { width: 85%; padding: 15px; border-radius: 50px; background: #e94560; color: white; font-size: 1.8rem; font-weight: bold; margin-top: 20px; }
+        .claim-btn { width: 85%; padding: 15px; border-radius: 50px; background: #e94560; color: white; font-size: 1.8rem; font-weight: bold; margin-top: 20px; margin-bottom: 30px; }
     </style>
 </head>
 <body>
@@ -24,11 +29,20 @@
         <div class="recent-container" id="recent-nums"></div>
     </div>
 
+    <div class="bingo-header">
+        <div class="letter">B</div>
+        <div class="letter">I</div>
+        <div class="letter">N</div>
+        <div class="letter">G</div>
+        <div class="letter">O</div>
+    </div>
+
     <div class="grid" id="board"></div>
     <button id="bingo-btn" class="claim-btn" onclick="claim()">BINGO!</button>
 
     <script>
         const tg = window.Telegram.WebApp;
+        // Ensure this matches your current ngrok URL
         const API_URL = "https://uphold-islamist-retail.ngrok-free.dev"; 
         const params = new URLSearchParams(window.location.search);
         const mySession = params.get('s');
@@ -48,7 +62,6 @@
 
                 document.getElementById('status-bar').innerText = data.active ? "● LIVE" : "⏳ WAITING";
                 
-                // Show 5 recent numbers with unique color for the newest
                 const container = document.getElementById('recent-nums');
                 if (JSON.stringify(data.recent) !== JSON.stringify(knownNumbers)) {
                     knownNumbers = data.recent;
@@ -64,33 +77,40 @@
         }
 
         async function loadBoard() {
-            const res = await fetch(`${API_URL}/get_card?user_id=${myUid}`, { headers: {"ngrok-skip-browser-warning": "true"} });
-            const data = await res.json();
-            const board = document.getElementById('board');
-            // Transpose columns back to rows for display
-            for(let r=0; r<5; r++) {
-                for(let c=0; c<5; c++) {
-                    const cell = document.createElement('div');
-                    cell.className = 'cell';
-                    if(c===2 && r===2) { cell.innerText="FREE"; cell.classList.add('marked'); }
-                    else {
-                        cell.innerText = data.card[c][r];
-                        cell.onclick = () => { cell.classList.toggle('marked'); tg.HapticFeedback.impactOccurred('light'); };
+            try {
+                const res = await fetch(`${API_URL}/get_card?user_id=${myUid}`, { headers: {"ngrok-skip-browser-warning": "true"} });
+                const data = await res.json();
+                const board = document.getElementById('board');
+                for(let r=0; r<5; r++) {
+                    for(let c=0; c<5; c++) {
+                        const cell = document.createElement('div');
+                        cell.className = 'cell';
+                        if(c===2 && r===2) { 
+                            cell.innerText="FREE"; cell.classList.add('marked'); 
+                        } else {
+                            cell.innerText = data.card[c][r];
+                            cell.onclick = () => { 
+                                cell.classList.toggle('marked'); 
+                                tg.HapticFeedback.impactOccurred('light'); 
+                            };
+                        }
+                        board.appendChild(cell);
                     }
-                    board.appendChild(cell);
                 }
-            }
+            } catch (e) { console.error("Board load failed", e); }
         }
 
         async function claim() {
             const marked = Array.from(document.querySelectorAll('.cell.marked')).map(c => c.innerText);
-            const res = await fetch(`${API_URL}/claim_bingo`, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ user: tg.initDataUnsafe.user?.username || "Player", user_id: myUid, numbers: marked })
-            });
-            const result = await res.json();
-            tg.showAlert(result.status === "success" ? "🏆 Claim Sent!" : "❌ " + result.message);
+            try {
+                const res = await fetch(`${API_URL}/claim_bingo`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ user: tg.initDataUnsafe.user?.username || "Player", user_id: myUid, numbers: marked })
+                });
+                const result = await res.json();
+                tg.showAlert(result.status === "success" ? "🏆 Claim Sent!" : "❌ " + result.message);
+            } catch (e) { tg.showAlert("Error sending claim."); }
         }
 
         loadBoard();
