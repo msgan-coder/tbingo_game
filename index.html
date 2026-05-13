@@ -13,7 +13,6 @@
         .num-ball.latest { background: #e94560; color: white; transform: scale(1.2); border-color: #fff; box-shadow: 0 0 15px #e94560; }
         @keyframes pop { 0% { transform: scale(0); } 100% { transform: scale(1); } }
         
-        /* --- BINGO LETTERS STYLE --- */
         .bingo-header { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; width: 92%; max-width: 380px; margin-bottom: 5px; }
         .letter { text-align: center; font-size: 1.8rem; font-weight: 900; color: #e94560; text-shadow: 0 0 10px rgba(233, 69, 96, 0.5); }
         
@@ -42,8 +41,9 @@
 
     <script>
         const tg = window.Telegram.WebApp;
-        // Ensure this matches your current ngrok URL
-        const API_URL = "https://uphold-islamist-retail.ngrok-free.dev";                        "; 
+        // 1. FIXED: Removed trailing characters from URL
+        const API_URL = "https://uphold-islamist-retail.ngrok-free.dev"; 
+        
         const params = new URLSearchParams(window.location.search);
         const mySession = params.get('s');
         const myUid = params.get('u');
@@ -51,10 +51,13 @@
 
         async function update() {
             try {
-                const res = await fetch(`${API_URL}/get_numbers`, { headers: {"ngrok-skip-browser-warning": "true"} });
+                const res = await fetch(`${API_URL}/get_numbers`, { 
+                    headers: {"ngrok-skip-browser-warning": "true"} 
+                });
                 const data = await res.json();
                 
-                if (data.session_id !== mySession) {
+                // 2. FIXED: Use toString() to ensure comparison works
+                if (data.session_id.toString() !== mySession.toString()) {
                     document.getElementById('status-bar').innerText = "❌ SESSION EXPIRED";
                     document.getElementById('bingo-btn').disabled = true;
                     return;
@@ -73,14 +76,28 @@
                         container.appendChild(ball);
                     });
                 }
-            } catch (e) { document.getElementById('status-bar').innerText = "OFFLINE"; }
+            } catch (e) { 
+                document.getElementById('status-bar').innerText = "OFFLINE (Check Ngrok)"; 
+            }
         }
 
         async function loadBoard() {
             try {
-                const res = await fetch(`${API_URL}/get_card?user_id=${myUid}`, { headers: {"ngrok-skip-browser-warning": "true"} });
+                // 3. FIXED: Added 's' parameter to validation for safety
+                const res = await fetch(`${API_URL}/get_card?user_id=${myUid}&s=${mySession}`, { 
+                    headers: {"ngrok-skip-browser-warning": "true"} 
+                });
                 const data = await res.json();
+                
+                if(!data.card) {
+                    console.error("No card in response");
+                    return;
+                }
+
                 const board = document.getElementById('board');
+                board.innerHTML = ""; // Clear before loading
+                
+                // 4. FIXED: Correctly mapping the nested card array [columns][rows]
                 for(let r=0; r<5; r++) {
                     for(let c=0; c<5; c++) {
                         const cell = document.createElement('div');
@@ -88,6 +105,7 @@
                         if(c===2 && r===2) { 
                             cell.innerText="FREE"; cell.classList.add('marked'); 
                         } else {
+                            // Python generates card as card[column][row]
                             cell.innerText = data.card[c][r];
                             cell.onclick = () => { 
                                 cell.classList.toggle('marked'); 
@@ -97,7 +115,10 @@
                         board.appendChild(cell);
                     }
                 }
-            } catch (e) { console.error("Board load failed", e); }
+            } catch (e) { 
+                console.error("Board load failed", e);
+                document.getElementById('status-bar').innerText = "CARD ERROR";
+            }
         }
 
         async function claim() {
@@ -106,13 +127,18 @@
                 const res = await fetch(`${API_URL}/claim_bingo`, {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ user: tg.initDataUnsafe.user?.username || "Player", user_id: myUid, numbers: marked })
+                    body: JSON.stringify({ 
+                        user: tg.initDataUnsafe.user?.username || "Player", 
+                        user_id: myUid, 
+                        numbers: marked 
+                    })
                 });
                 const result = await res.json();
                 tg.showAlert(result.status === "success" ? "🏆 Claim Sent!" : "❌ " + result.message);
             } catch (e) { tg.showAlert("Error sending claim."); }
         }
 
+        // Initialize
         loadBoard();
         setInterval(update, 2000);
         tg.expand();
