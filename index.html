@@ -121,23 +121,42 @@
             }
         }
 
-        async function claim() {
-            const marked = Array.from(document.querySelectorAll('.cell.marked')).map(c => c.innerText);
-            try {
-                const res = await fetch(`${API_URL}/claim_bingo`, {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ 
-                        user: tg.initDataUnsafe.user?.username || "Player", 
-                        user_id: myUid, 
-                        numbers: marked 
-                    })
-                });
-                const result = await res.json();
-                tg.showAlert(result.status === "success" ? "🏆 Claim Sent!" : "❌ " + result.message);
-            } catch (e) { tg.showAlert("Error sending claim."); }
-        }
+       async function claim() {
+    // Show a loading state on the button
+    const btn = document.getElementById('bingo-btn');
+    btn.disabled = true;
+    btn.innerText = "VERIFYING...";
 
+    const marked = Array.from(document.querySelectorAll('.cell.marked')).map(c => c.innerText);
+    
+    // Get the best possible name for the user
+    const userName = tg.initDataUnsafe.user?.username || tg.initDataUnsafe.user?.first_name || "Player";
+
+    try {
+        const res = await fetch(`${API_URL}/claim_bingo`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ 
+                user: userName, 
+                user_id: myUid, 
+                numbers: marked 
+            })
+        });
+        const result = await res.json();
+        
+        if (result.status === "success") {
+            tg.showAlert("🏆 BINGO Sent! Wait for Admin. / ቢንጎ ተልኳል! አድሚኑን ይጠብቁ።");
+        } else {
+            tg.showAlert("❌ " + result.message);
+            btn.disabled = false;
+            btn.innerText = "BINGO!";
+        }
+    } catch (e) { 
+        tg.showAlert("Connection Error / የኔትወርክ ችግር"); 
+        btn.disabled = false;
+        btn.innerText = "BINGO!";
+    }
+}
         // Initialize
         loadBoard();
         setInterval(update, 2000);
