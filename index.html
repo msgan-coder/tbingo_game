@@ -8,14 +8,16 @@
     <style>
         body { font-family: 'Segoe UI', sans-serif; background: #1a1a2e; color: white; display: flex; flex-direction: column; align-items: center; padding-top: 140px; margin: 0; }
         .header { position: fixed; top: 0; width: 100%; background: #16213e; padding: 10px 0; text-align: center; border-bottom: 4px solid #e94560; z-index: 1000; }
+        
+        /* Style for the Close/Minimize Button */
+        .min-btn { position: absolute; left: 15px; top: 15px; background: rgba(233, 69, 96, 0.2); border: 1px solid #e94560; color: white; border-radius: 8px; padding: 6px 12px; font-weight: bold; font-size: 0.7rem; }
+        
         .recent-container { display: flex; justify-content: center; gap: 10px; margin-top: 10px; height: 50px; }
         .num-ball { width: 45px; height: 45px; background: #0f3460; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 0.9rem; border: 2px solid #e94560; animation: pop 0.4s ease-out; }
         .num-ball.latest { background: #e94560; color: white; transform: scale(1.2); border-color: #fff; box-shadow: 0 0 15px #e94560; }
         @keyframes pop { 0% { transform: scale(0); } 100% { transform: scale(1); } }
-        
         .bingo-header { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; width: 92%; max-width: 380px; margin-bottom: 5px; }
         .letter { text-align: center; font-size: 1.8rem; font-weight: 900; color: #e94560; text-shadow: 0 0 10px rgba(233, 69, 96, 0.5); }
-        
         .grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; width: 92%; max-width: 380px; }
         .cell { aspect-ratio: 1; background: #0f3460; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 1.4rem; font-weight: bold; border: 2px solid #16213e; }
         .cell.marked { background: #27ae60; border-color: #fff; }
@@ -24,17 +26,14 @@
 </head>
 <body>
     <div class="header">
-    <button onclick="tg.close()" style="position: absolute; left: 10px; top: 10px; background: #e94560; border: none; color: white; border-radius: 5px; padding: 5px 10px; font-size: 0.8rem; cursor: pointer;">CLOSE</button>
+        <button class="min-btn" onclick="tg.close()">CLOSE</button>
+        
         <div id="status-bar">CONNECTING...</div>
         <div class="recent-container" id="recent-nums"></div>
     </div>
 
     <div class="bingo-header">
-        <div class="letter">B</div>
-        <div class="letter">I</div>
-        <div class="letter">N</div>
-        <div class="letter">G</div>
-        <div class="letter">O</div>
+        <div class="letter">B</div><div class="letter">I</div><div class="letter">N</div><div class="letter">G</div><div class="letter">O</div>
     </div>
 
     <div class="grid" id="board"></div>
@@ -42,7 +41,6 @@
 
     <script>
         const tg = window.Telegram.WebApp;
-        // 1. FIXED: Removed trailing characters from URL
         const API_URL = "https://uphold-islamist-retail.ngrok-free.dev"; 
         
         const params = new URLSearchParams(window.location.search);
@@ -52,20 +50,14 @@
 
         async function update() {
             try {
-                const res = await fetch(`${API_URL}/get_numbers`, { 
-                    headers: {"ngrok-skip-browser-warning": "true"} 
-                });
+                const res = await fetch(`${API_URL}/get_numbers`, { headers: {"ngrok-skip-browser-warning": "true"} });
                 const data = await res.json();
-                
-                // 2. FIXED: Use toString() to ensure comparison works
                 if (data.session_id.toString() !== mySession.toString()) {
                     document.getElementById('status-bar').innerText = "❌ SESSION EXPIRED";
                     document.getElementById('bingo-btn').disabled = true;
                     return;
                 }
-
                 document.getElementById('status-bar').innerText = data.active ? "● LIVE" : "⏳ WAITING";
-                
                 const container = document.getElementById('recent-nums');
                 if (JSON.stringify(data.recent) !== JSON.stringify(knownNumbers)) {
                     knownNumbers = data.recent;
@@ -77,91 +69,55 @@
                         container.appendChild(ball);
                     });
                 }
-            } catch (e) { 
-                document.getElementById('status-bar').innerText = "OFFLINE (Check Ngrok)"; 
-            }
+            } catch (e) { document.getElementById('status-bar').innerText = "OFFLINE"; }
         }
 
         async function loadBoard() {
             try {
-                // 3. FIXED: Added 's' parameter to validation for safety
-                const res = await fetch(`${API_URL}/get_card?user_id=${myUid}&s=${mySession}`, { 
-                    headers: {"ngrok-skip-browser-warning": "true"} 
-                });
+                const res = await fetch(`${API_URL}/get_card?user_id=${myUid}&s=${mySession}`, { headers: {"ngrok-skip-browser-warning": "true"} });
                 const data = await res.json();
-                
-                if(!data.card) {
-                    console.error("No card in response");
-                    return;
-                }
-
                 const board = document.getElementById('board');
-                board.innerHTML = ""; // Clear before loading
-                
-                // 4. FIXED: Correctly mapping the nested card array [columns][rows]
+                board.innerHTML = "";
                 for(let r=0; r<5; r++) {
                     for(let c=0; c<5; c++) {
                         const cell = document.createElement('div');
                         cell.className = 'cell';
-                        if(c===2 && r===2) { 
-                            cell.innerText="FREE"; cell.classList.add('marked'); 
-                        } else {
-                            // Python generates card as card[column][row]
+                        if(c===2 && r===2) { cell.innerText="FREE"; cell.classList.add('marked'); }
+                        else {
                             cell.innerText = data.card[c][r];
-                            cell.onclick = () => { 
-                                cell.classList.toggle('marked'); 
-                                tg.HapticFeedback.impactOccurred('light'); 
-                            };
+                            cell.onclick = () => { cell.classList.toggle('marked'); tg.HapticFeedback.impactOccurred('light'); };
                         }
                         board.appendChild(cell);
                     }
                 }
-            } catch (e) { 
-                console.error("Board load failed", e);
-                document.getElementById('status-bar').innerText = "CARD ERROR";
-            }
+            } catch (e) { document.getElementById('status-bar').innerText = "CARD ERROR"; }
         }
 
-       async function claim() {
-    // Show a loading state on the button
-    const btn = document.getElementById('bingo-btn');
-    btn.disabled = true;
-    btn.innerText = "VERIFYING...";
-
-    const marked = Array.from(document.querySelectorAll('.cell.marked')).map(c => c.innerText);
-    
-    // Get the best possible name for the user
-    const userName = tg.initDataUnsafe.user?.username || tg.initDataUnsafe.user?.first_name || "Player";
-
-    try {
-        const res = await fetch(`${API_URL}/claim_bingo`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ 
-                user: userName, 
-                user_id: myUid, 
-                numbers: marked 
-            })
-        });
-        const result = await res.json();
-        
-        if (result.status === "success") {
-            tg.showAlert("🏆 BINGO Sent! Wait for Admin. / ቢንጎ ተልኳል! አድሚኑን ይጠብቁ።");
-        } else {
-            tg.showAlert("❌ " + result.message);
-            btn.disabled = false;
-            btn.innerText = "BINGO!";
+        async function claim() {
+            const btn = document.getElementById('bingo-btn');
+            btn.disabled = true;
+            btn.innerText = "VERIFYING...";
+            const marked = Array.from(document.querySelectorAll('.cell.marked')).map(c => c.innerText);
+            const userName = tg.initDataUnsafe.user?.username || tg.initDataUnsafe.user?.first_name || "Player";
+            try {
+                const res = await fetch(`${API_URL}/claim_bingo`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ user: userName, user_id: myUid, numbers: marked })
+                });
+                const result = await res.json();
+                tg.showAlert(result.status === "success" ? "🏆 BINGO Sent!" : "❌ " + result.message);
+                if (result.status !== "success") { btn.disabled = false; btn.innerText = "BINGO!"; }
+            } catch (e) { tg.showAlert("Connection Error"); btn.disabled = false; btn.innerText = "BINGO!"; }
         }
-    } catch (e) { 
-        tg.showAlert("Connection Error / የኔትወርክ ችግር"); 
-        btn.disabled = false;
-        btn.innerText = "BINGO!";
-    }
-}
-        // Initialize
+
         loadBoard();
         setInterval(update, 2000);
+        
+        // Telegram WebApp specific settings
         tg.expand();
+        tg.setHeaderColor('#16213e');
+        tg.enableClosingConfirmation();
     </script>
 </body>
 </html>
