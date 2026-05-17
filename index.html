@@ -21,7 +21,11 @@
         .grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; width: 92%; max-width: 380px; }
         .cell { aspect-ratio: 1; background: #0f3460; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 1.4rem; font-weight: bold; border: 2px solid #16213e; }
         .cell.marked { background: #27ae60; border-color: #fff; }
-        .claim-btn { width: 85%; padding: 15px; border-radius: 50px; background: #e94560; color: white; font-size: 1.8rem; font-weight: bold; margin-top: 20px; margin-bottom: 30px; }
+        .claim-btn { width: 85%; padding: 15px; border-radius: 50px; background: #e94560; color: white; font-size: 1.8rem; font-weight: bold; margin-top: 20px; margin-bottom: 15px; }
+        
+        /* Styled specifically for your dark theme layout */
+        .rule-box { text-align: center; margin-top: 5px; margin-bottom: 35px; font-weight: bold; font-size: 1.2rem; color: #fff; background: #16213e; padding: 10px 25px; border-radius: 12px; border: 1px solid #e94560; }
+        .rule-box span { color: #e94560; }
     </style>
 </head>
 <body>
@@ -39,6 +43,11 @@
     <div class="grid" id="board"></div>
     <button id="bingo-btn" class="claim-btn" onclick="claim()">BINGO!</button>
 
+    <!-- STEP 1: Rule Display placed perfectly at the bottom of your elements -->
+    <div id="rule-display" class="rule-box">
+        Rule: <span>Loading...</span>
+    </div>
+
     <script>
         const tg = window.Telegram.WebApp;
         const API_URL = "https://uphold-islamist-retail.ngrok-free.dev"; 
@@ -47,17 +56,39 @@
         const mySession = params.get('s');
         const myUid = params.get('u');
         let knownNumbers = [];
+        let gameOverAlerted = false; // Prevents the alert window from popping up infinitely
 
         async function update() {
             try {
                 const res = await fetch(`${API_URL}/get_numbers`, { headers: {"ngrok-skip-browser-warning": "true"} });
                 const data = await res.json();
+                
                 if (data.session_id.toString() !== mySession.toString()) {
                     document.getElementById('status-bar').innerText = "❌ SESSION EXPIRED";
                     document.getElementById('bingo-btn').disabled = true;
                     return;
                 }
+                
                 document.getElementById('status-bar').innerText = data.active ? "● LIVE" : "⏳ WAITING";
+                
+                // STEP 2: Update the bottom text with the active rule coming from backend
+                if (data.win_mode) {
+                    document.getElementById('rule-display').innerHTML = `Rule: <span>${data.win_mode}</span>`;
+                }
+
+                // STEP 3: Listen for Game Over status flag
+                if (data.game_over === true) {
+                    if (!gameOverAlerted) {
+                        gameOverAlerted = true;
+                        document.getElementById('bingo-btn').disabled = true;
+                        document.getElementById('status-bar').innerText = "🏁 GAME OVER";
+                        document.body.style.opacity = "0.5"; // Dims the screen visually
+                        tg.showAlert("📢 GAME OVER!\nSomeone has won the game! Please wait for the next round.");
+                    }
+                } else {
+                    gameOverAlerted = false;
+                }
+
                 const container = document.getElementById('recent-nums');
                 if (JSON.stringify(data.recent) !== JSON.stringify(knownNumbers)) {
                     knownNumbers = data.recent;
