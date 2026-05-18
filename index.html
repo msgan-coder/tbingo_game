@@ -47,7 +47,10 @@
     <div id="rule-display" class="rule-box">
         Rule: <span>Loading...</span>
     </div>
-
+<div id="game-alert-box" class="rule-box" style="display: none; background: #e94560; border-color: #fff; margin-top: 10px;">
+        <div id="alert-text-en" style="font-size: 1rem;"></div>
+        <div id="alert-text-am" style="font-size: 1rem; margin-top: 5px;"></div>
+    </div>
     <script>
         const tg = window.Telegram.WebApp;
         const API_URL = "https://uphold-islamist-retail.ngrok-free.dev"; 
@@ -70,7 +73,29 @@
                 }
                 
                 document.getElementById('status-bar').innerText = data.active ? "● LIVE" : "⏳ WAITING";
-                
+                // --- BINGO CLAIM & WINNER LOGIC ---
+                const alertBox = document.getElementById('game-alert-box');
+                const alertEn = document.getElementById('alert-text-en');
+                const alertAm = document.getElementById('alert-text-am');
+
+                if (data.verifying) {
+                    // Someone clicked Bingo, Admin is checking
+                    alertBox.style.display = "block";
+                    alertBox.style.background = "#f39c12"; // Orange for verifying
+                    alertEn.innerHTML = `⚠️ <b>@${data.claimant}</b> sent claim bingo to verify!`;
+                    alertAm.innerHTML = `⚠️ <b>@${data.claimant}</b> ቢንጎ ብለዋል ለማረጋገጥ እየተሞከረ ነው!`;
+                } 
+                else if (data.game_over && data.winner) {
+                    // Admin confirmed the winner
+                    alertBox.style.display = "block";
+                    alertBox.style.background = "#27ae60"; // Green for winner
+                    alertEn.innerHTML = `🏆 <b>GAME OVER! @${data.winner} win the game!</b>`;
+                    alertAm.innerHTML = `🏆 <b>ጨዋታው ተጠናቋል! @${data.winner} አሸንፈዋል!</b>`;
+                } 
+                else if (!data.verifying && data.active && !data.paused) {
+                    // Game is continuing (Reject happened or game is just running)
+                    alertBox.style.display = "none"; 
+                }
                 // STEP 2: Update the bottom text with the active rule coming from backend
                 if (data.win_mode) {
                     document.getElementById('rule-display').innerHTML = `Rule: <span>${data.win_mode}</span>`;
