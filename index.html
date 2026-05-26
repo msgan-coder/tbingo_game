@@ -43,7 +43,6 @@
     <div class="grid" id="board"></div>
     <button id="bingo-btn" class="claim-btn" onclick="claim()">BINGO!</button>
 
-    <!-- STEP 1: Rule Display placed perfectly at the bottom of your elements -->
     <div id="rule-display" class="rule-box">
         Rule: <span>Loading...</span>
     </div>
@@ -53,9 +52,18 @@
     </div>
     <script>
         const tg = window.Telegram.WebApp;
-        const API_URL = "https://uphold-islamist-retail.ngrok-free.dev"; 
         
         const params = new URLSearchParams(window.location.search);
+        
+        // --- CHANGED SECTION ---
+        // Dynamically get the Ngrok API URL from the bot's button parameter.
+        // Falls back to your hardcoded ngrok URL if none is found.
+        let API_URL = params.get('api') || "https://uphold-islamist-retail.ngrok-free.dev";
+        if (API_URL.endsWith('/')) {
+            API_URL = API_URL.slice(0, -1);
+        }
+        // -----------------------
+        
         const mySession = params.get('s');
         const myUid = params.get('u');
         let knownNumbers = [];
