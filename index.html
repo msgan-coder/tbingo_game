@@ -6,221 +6,182 @@
     <title>T-Bingo Live</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
-        body { font-family: 'Segoe UI', sans-serif; background: #1a1a2e; color: white; display: flex; flex-direction: column; align-items: center; padding-top: 140px; margin: 0; }
+        body { font-family: 'Segoe UI', sans-serif; background: #1a1a2e; color: white; display: flex; flex-direction: column; align-items: center; padding-top: 140px; margin: 0; user-select: none; }
         .header { position: fixed; top: 0; width: 100%; background: #16213e; padding: 10px 0; text-align: center; border-bottom: 4px solid #e94560; z-index: 1000; }
-        
-        /* Style for the Close/Minimize Button */
         .min-btn { position: absolute; left: 15px; top: 15px; background: rgba(233, 69, 96, 0.2); border: 1px solid #e94560; color: white; border-radius: 8px; padding: 6px 12px; font-weight: bold; font-size: 0.7rem; }
-        
-        .recent-container { display: flex; justify-content: center; gap: 10px; margin-top: 10px; height: 50px; }
-        .num-ball { width: 45px; height: 45px; background: #0f3460; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 0.9rem; border: 2px solid #e94560; animation: pop 0.4s ease-out; }
-        .num-ball.latest { background: #e94560; color: white; transform: scale(1.2); border-color: #fff; box-shadow: 0 0 15px #e94560; }
+        .recent-container { display: flex; justify-content: center; gap: 8px; margin-top: 8px; height: 40px; align-items: center; }
+        .ball { width: 36px; height: 36px; border-radius: 50%; background: radial-gradient(circle at 30% 30%, #feb155, #e94560); color: white; font-weight: bold; display: flex; align-items: center; justify-content: center; font-size: 1.1rem; box-shadow: 0 4px 8px rgba(0,0,0,0.4); animation: pop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+        .ball.recent { width: 46px; height: 46px; background: radial-gradient(circle at 30% 30%, #ff7e67, #ff007f); font-size: 1.4rem; border: 2px solid #fff; }
+        .grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; width: 92%; max-width: 360px; background: #16213e; padding: 10px; border-radius: 12px; box-shadow: 0 8px 16px rgba(0,0,0,0.5); }
+        .cell { aspect-ratio: 1; background: #0f3460; border-radius: 8px; display: flex; flex-direction: column; align-items: center; justify-content: center; font-weight: bold; font-size: 1.2rem; cursor: pointer; border: 1px solid #1a1a2e; transition: all 0.1s linear; color: #e2e2e2; }
+        .cell.marked { background: #e94560 !important; color: white !important; box-shadow: inset 0 0 10px rgba(0,0,0,0.5); transform: scale(0.96); border-color: #fff; }
+        .cell.free-cell { background: #233e5b; color: #feb155; font-size: 0.8rem; }
+        .btn-claim { margin-top: 25px; width: 85%; max-width: 300px; padding: 14px; background: linear-gradient(45deg, #ff7e67, #e94560); border: none; color: white; font-weight: bold; font-size: 1.3rem; border-radius: 10px; box-shadow: 0 6px 12px rgba(233,69,96,0.4); cursor: pointer; letter-spacing: 1px; }
+        .btn-claim:disabled { background: #555 !important; box-shadow: none !important; cursor: not-allowed; }
+        .room-indicator { font-size: 0.8rem; color: #00fff0; letter-spacing: 1px; margin-top: 4px; font-weight: bold; text-transform: uppercase; }
         @keyframes pop { 0% { transform: scale(0); } 100% { transform: scale(1); } }
-        .bingo-header { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; width: 92%; max-width: 380px; margin-bottom: 5px; }
-        .letter { text-align: center; font-size: 1.8rem; font-weight: 900; color: #e94560; text-shadow: 0 0 10px rgba(233, 69, 96, 0.5); }
-        .grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; width: 92%; max-width: 380px; }
-        .cell { aspect-ratio: 1; background: #0f3460; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 1.4rem; font-weight: bold; border: 2px solid #16213e; }
-        .cell.marked { background: #27ae60; border-color: #fff; }
-        .claim-btn { width: 85%; padding: 15px; border-radius: 50px; background: #e94560; color: white; font-size: 1.8rem; font-weight: bold; margin-top: 20px; margin-bottom: 15px; }
-        
-        /* Styled specifically for your dark theme layout */
-        .rule-box { text-align: center; margin-top: 5px; margin-bottom: 35px; font-weight: bold; font-size: 1.2rem; color: #fff; background: #16213e; padding: 10px 25px; border-radius: 12px; border: 1px solid #e94560; }
-        .rule-box span { color: #e94560; }
     </style>
 </head>
 <body>
+
     <div class="header">
-        <button class="min-btn" onclick="tg.close()">CLOSE</button>
-        
-        <div id="status-bar">CONNECTING...</div>
-        <div class="recent-container" id="recent-nums"></div>
+        <button class="min-btn" onclick="tg.close();">❌ CLOSE</button>
+        <div id="call-status" style="font-size: 1.3rem; font-weight: bold; color: #feb155;">WAITING FOR DRAW...</div>
+        <div id="room-title" class="room-indicator">ROOM: -</div>
+        <div class="recent-container" id="recent-balls"></div>
     </div>
 
-    <div class="bingo-header">
-        <div class="letter">B</div><div class="letter">I</div><div class="letter">N</div><div class="letter">G</div><div class="letter">O</div>
-    </div>
+    <div class="grid" id="bingo-grid"></div>
 
-    <div class="grid" id="board"></div>
-    <button id="bingo-btn" class="claim-btn" onclick="claim()">BINGO!</button>
+    <button class="btn-claim" id="bingo-btn" onclick="claimBingo();">BINGO!</button>
 
-    <div id="rule-display" class="rule-box">
-        Rule: <span>Loading...</span>
-    </div>
-<div id="game-alert-box" class="rule-box" style="display: none; background: #e94560; border-color: #fff; margin-top: 10px;">
-        <div id="alert-text-en" style="font-size: 1rem;"></div>
-        <div id="alert-text-am" style="font-size: 1rem; margin-top: 5px;"></div>
-    </div>
     <script>
         const tg = window.Telegram.WebApp;
-        
+        tg.expand();
+
         const params = new URLSearchParams(window.location.search);
+        const myUid = params.get('user_id') || '0';
         
-        // --- CHANGED SECTION ---
-        // Dynamically get the Ngrok API URL from the bot's button parameter.
-        // Falls back to your hardcoded ngrok URL if none is found.
-        let API_URL = params.get('api') || "https://uphold-islamist-retail.ngrok-free.dev";
-        if (API_URL.endsWith('/')) {
-            API_URL = API_URL.slice(0, -1);
-        }
-        // -----------------------
-        
-        const mySession = params.get('s');
-        const myUid = params.get('u');
+        // FIX TASK 3: Verify room_id travels completely into the client system framework
         const myRoom = params.get('room_id') || 'beginner';
+        const mySession = params.get('session_id') || '';
+        
+        // FIX TASK 2: Dynamic fallback implementation pointing exactly to the verified Ngrok gateway parameter
+        const API_URL = params.get('api_url') || 'http://127.0.0.1:5000';
 
-        let knownNumbers = [];
-        let gameOverAlerted = false; // Prevents the alert window from popping up infinitely
+        document.getElementById('room-title').innerText = `ROOM: ${myRoom}`;
 
-        async function update() {
-            try {
-                const res = await fetch(
-                    `${API_URL}/get_numbers?room_id=${myRoom}`,
-                     { headers: {"ngrok-skip-browser-warning": "true"} }
-                );
-                const data = await res.json();
-                
-                if (data.session_id.toString() !== mySession.toString()) {
-                    document.getElementById('status-bar').innerText = "❌ SESSION EXPIRED";
-                    document.getElementById('bingo-btn').disabled = true;
-                    return;
-                }
-                
-                document.getElementById('status-bar').innerText = data.active ? "● LIVE" : "⏳ WAITING";
-                // --- BINGO CLAIM & WINNER LOGIC ---
-                const alertBox = document.getElementById('game-alert-box');
-                const alertEn = document.getElementById('alert-text-en');
-                const alertAm = document.getElementById('alert-text-am');
-
-                if (data.verifying) {
-                    // Someone clicked Bingo, Admin is checking
-                    alertBox.style.display = "block";
-                    alertBox.style.background = "#f39c12"; // Orange for verifying
-                    alertEn.innerHTML = `⚠️ <b>@${data.claimant}</b> sent claim bingo to verify!`;
-                    alertAm.innerHTML = `⚠️ <b>@${data.claimant}</b> ቢንጎ ብለዋል ለማረጋገጥ እየተሞከረ ነው!`;
-                } 
-                else if (data.game_over && data.winner) {
-                    // Admin confirmed the winner
-                    alertBox.style.display = "block";
-                    alertBox.style.background = "#27ae60"; // Green for winner
-                    alertEn.innerHTML = `🏆 <b>GAME OVER! @${data.winner} win the game!</b>`;
-                    alertAm.innerHTML = `🏆 <b>ጨዋታው ተጠናቋል! @${data.winner} አሸንፈዋል!</b>`;
-                } 
-                else if (!data.verifying && data.active && !data.paused) {
-                    // Game is continuing (Reject happened or game is just running)
-                    alertBox.style.display = "none"; 
-                }
-                // STEP 2: Update the bottom text with the active rule coming from backend
-                if (data.win_mode) {
-                    document.getElementById('rule-display').innerHTML = `Rule: <span>${data.win_mode}</span>`;
-                }
-
-                // STEP 3: Listen for Game Over status flag
-                if (data.game_over === true) {
-                    if (!gameOverAlerted) {
-                        gameOverAlerted = true;
-                        document.getElementById('bingo-btn').disabled = true;
-                        document.getElementById('status-bar').innerText = "🏁 GAME OVER";
-                        document.body.style.opacity = "0.5"; // Dims the screen visually
-                        tg.showAlert("📢 GAME OVER!\nSomeone has won the game! Please wait for the next round.");
-                    }
-                } else {
-                    gameOverAlerted = false;
-                }
-
-                const container = document.getElementById('recent-nums');
-                if (JSON.stringify(data.recent) !== JSON.stringify(knownNumbers)) {
-                    knownNumbers = data.recent;
-                    container.innerHTML = "";
-                    data.recent.forEach((n, i) => {
-                        const ball = document.createElement('div');
-                        ball.className = i === 0 ? "num-ball latest" : "num-ball";
-                        ball.innerText = n;
-                        container.appendChild(ball);
-                    });
-                }
-            } catch (e) { document.getElementById('status-bar').innerText = "OFFLINE"; }
-        }
+        let cardMatrix = [];
+        let numbersCalled = [];
 
         async function loadBoard() {
             try {
-                const res = await fetch(
-               `${API_URL}/get_card?user_id=${myUid}&s=${mySession}&room_id=${myRoom}`,
-                { headers: {"ngrok-skip-browser-warning": "true"} }
-            );
-                const data = await res.json();
-                const board = document.getElementById('board');
-                board.innerHTML = "";
-                for(let r=0; r<5; r++) {
-                    for(let c=0; c<5; c++) {
-                        const cell = document.createElement('div');
-                        cell.className = 'cell';
-                        if(c===2 && r===2) { cell.innerText="FREE"; cell.classList.add('marked'); }
-                        else {
-                            cell.innerText = data.card[c][r];
-                            cell.onclick = () => { cell.classList.toggle('marked'); tg.HapticFeedback.impactOccurred('light'); };
-                        }
-                        board.appendChild(cell);
-                    }
+                const response = await fetch(`${API_URL}/get_card`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user_id: myUid, room_id: myRoom, session_id: mySession })
+                });
+                const data = await response.json();
+                if(data.status === "success") {
+                    cardMatrix = data.card;
+                    renderGrid();
+                } else {
+                    tg.showAlert("Initialization Error: " + data.message);
                 }
-            } catch (e) { document.getElementById('status-bar').innerText = "CARD ERROR"; }
+            } catch(e) {
+                tg.showAlert("Failed to connect to streaming API backend channels.");
+            }
         }
 
-       async function claim() {
+        function renderGrid() {
+            const container = document.getElementById('bingo-grid');
+            container.innerHTML = "";
+            
+            // Transpose columns layout array structure securely to standard visual rows format grids mapping matching views
+            for(let r = 0; r < 5; r++) {
+                for(let c = 0; c < 5; c++) {
+                    const cellVal = cardMatrix[c][r];
+                    const div = document.createElement('div');
+                    div.className = "cell";
+                    div.innerText = cellVal;
+                    
+                    if(cellVal === "FREE") {
+                        div.classList.add("free-cell", "marked");
+                        div.innerText = "FREE";
+                    } else {
+                        div.onclick = () => {
+                            if(numbersCalled.includes(parseInt(cellVal))) {
+                                div.classList.toggle('marked');
+                            } else {
+                                tg.showAlert("Number not drawn yet! | ቁጥሩ እስካሁን አልተጠራም !");
+                            }
+                        };
+                    }
+                    container.appendChild(div);
+                }
+            }
+        }
+
+        async function updateDraws() {
+            try {
+                const response = await fetch(`${API_URL}/get_numbers?room_id=${myRoom}&session_id=${mySession}`);
+                const data = await response.json();
+                
+                if (data.error) {
+                    document.getElementById('call-status').innerText = "SESSION ERROR";
+                    return;
+                }
+                
+                numbersCalled = data.called || [];
+                
+                if(numbersCalled.length > 0) {
+                    const lastNum = numbersCalled[numbersCalled.length - 1];
+                    const letter = lastNum <= 15 ? "B" : (lastNum <= 30 ? "I" : (lastNum <= 45 ? "N" : (lastNum <= 60 ? "G" : "O")));
+                    document.getElementById('call-status').innerText = `${letter} — ${lastNum}`;
+                    
+                    // Render historical track sequences
+                    const track = document.getElementById('recent-balls');
+                    track.innerHTML = "";
+                    const history = numbersCalled.slice(-4).reverse();
+                    history.forEach((num, idx) => {
+                        const b = document.createElement('div');
+                        b.className = idx === 0 ? "ball recent" : "ball";
+                        b.innerText = num;
+                        track.appendChild(b);
+                    });
+                }
+                
+                if(!data.game_active) {
+                    document.getElementById('bingo-btn').disabled = true;
+                } else if(data.paused) {
+                    document.getElementById('call-status').innerText = "⏸ PAUSED FOR VERIFICATION";
+                    document.getElementById('bingo-btn').disabled = true;
+                } else {
+                    document.getElementById('bingo-btn').disabled = false;
+                }
+            } catch(e) {
+                console.error("Tracking connection dropped stream sync loops.", e);
+            }
+        }
+
+        async function claimBingo() {
             const btn = document.getElementById('bingo-btn');
             btn.disabled = true;
             btn.innerText = "VERIFYING...";
 
-        const marked = Array.from(
-            document.querySelectorAll('.cell.marked')
-    ).map(c => c.innerText);
+            const marked = Array.from(document.querySelectorAll('.cell.marked')).map(c => c.innerText);
+            
+            const userName = tg.initDataUnsafe.user?.username || tg.initDataUnsafe.user?.first_name || "Player";
 
-    const userName =
-        tg.initDataUnsafe.user?.username ||
-        tg.initDataUnsafe.user?.first_name ||
-        "Player";
+            try {
+                const res = await fetch(`${API_URL}/claim_bingo`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        user: userName,
+                        user_id: myUid,
+                        room_id: myRoom,
+                        session_id: mySession,
+                        numbers: marked
+                    })
+                });
 
-    try {
-        const res = await fetch(`${API_URL}/claim_bingo`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                user: userName,
-                user_id: myUid,
-                room_id: myRoom,
-                session_id: mySession,
-                numbers: marked
-            })
-        });
+                const result = await res.json();
+                tg.showAlert(result.status === "success" ? "🏆 BINGO Sent!" : "❌ " + result.message);
 
-        const result = await res.json();
-
-        tg.showAlert(
-            result.status === "success"
-                ? "🏆 BINGO Sent!"
-                : "❌ " + result.message
-        );
-
-        if (result.status !== "success") {
-            btn.disabled = false;
-            btn.innerText = "BINGO!";
+                if (result.status !== "success") {
+                    btn.disabled = false;
+                    btn.innerText = "BINGO!";
+                }
+            } catch (e) {
+                tg.showAlert("Connection Error");
+                btn.disabled = false;
+                btn.innerText = "BINGO!";
+            }
         }
 
-    } catch (e) {
-        tg.showAlert("Connection Error");
-        btn.disabled = false;
-        btn.innerText = "BINGO!";
-    }
-}
-
-loadBoard();
-setInterval(update, 2000);
-        
-        // Telegram WebApp specific settings
-        tg.expand();
-        tg.setHeaderColor('#16213e');
-        tg.enableClosingConfirmation();
+        loadBoard();
+        setInterval(updateDraws, 3000);
     </script>
 </body>
 </html>
