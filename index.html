@@ -66,12 +66,17 @@
         
         const mySession = params.get('s');
         const myUid = params.get('u');
+        const myRoom = params.get('room_id') || 'beginner';
+
         let knownNumbers = [];
         let gameOverAlerted = false; // Prevents the alert window from popping up infinitely
 
         async function update() {
             try {
-                const res = await fetch(`${API_URL}/get_numbers`, { headers: {"ngrok-skip-browser-warning": "true"} });
+                const res = await fetch(
+                    `${API_URL}/get_numbers?room_id=${myRoom}`,
+                     { headers: {"ngrok-skip-browser-warning": "true"} }
+                );
                 const data = await res.json();
                 
                 if (data.session_id.toString() !== mySession.toString()) {
@@ -138,7 +143,10 @@
 
         async function loadBoard() {
             try {
-                const res = await fetch(`${API_URL}/get_card?user_id=${myUid}&s=${mySession}`, { headers: {"ngrok-skip-browser-warning": "true"} });
+                const res = await fetch(
+               `${API_URL}/get_card?user_id=${myUid}&s=${mySession}&room_id=${myRoom}`,
+                { headers: {"ngrok-skip-browser-warning": "true"} }
+            );
                 const data = await res.json();
                 const board = document.getElementById('board');
                 board.innerHTML = "";
@@ -157,26 +165,57 @@
             } catch (e) { document.getElementById('status-bar').innerText = "CARD ERROR"; }
         }
 
-        async function claim() {
+       async function claim() {
             const btn = document.getElementById('bingo-btn');
             btn.disabled = true;
             btn.innerText = "VERIFYING...";
-            const marked = Array.from(document.querySelectorAll('.cell.marked')).map(c => c.innerText);
-            const userName = tg.initDataUnsafe.user?.username || tg.initDataUnsafe.user?.first_name || "Player";
-            try {
-                const res = await fetch(`${API_URL}/claim_bingo`, {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ user: userName, user_id: myUid, numbers: marked })
-                });
-                const result = await res.json();
-                tg.showAlert(result.status === "success" ? "🏆 BINGO Sent!" : "❌ " + result.message);
-                if (result.status !== "success") { btn.disabled = false; btn.innerText = "BINGO!"; }
-            } catch (e) { tg.showAlert("Connection Error"); btn.disabled = false; btn.innerText = "BINGO!"; }
+
+        const marked = Array.from(
+            document.querySelectorAll('.cell.marked')
+    ).map(c => c.innerText);
+
+    const userName =
+        tg.initDataUnsafe.user?.username ||
+        tg.initDataUnsafe.user?.first_name ||
+        "Player";
+
+    try {
+        const res = await fetch(`${API_URL}/claim_bingo`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                user: userName,
+                user_id: myUid,
+                room_id: myRoom,
+                session_id: mySession,
+                numbers: marked
+            })
+        });
+
+        const result = await res.json();
+
+        tg.showAlert(
+            result.status === "success"
+                ? "🏆 BINGO Sent!"
+                : "❌ " + result.message
+        );
+
+        if (result.status !== "success") {
+            btn.disabled = false;
+            btn.innerText = "BINGO!";
         }
 
-        loadBoard();
-        setInterval(update, 2000);
+    } catch (e) {
+        tg.showAlert("Connection Error");
+        btn.disabled = false;
+        btn.innerText = "BINGO!";
+    }
+}
+
+loadBoard();
+setInterval(update, 2000);
         
         // Telegram WebApp specific settings
         tg.expand();
